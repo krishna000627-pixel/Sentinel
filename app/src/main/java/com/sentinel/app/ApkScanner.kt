@@ -44,7 +44,7 @@ object ApkScanner {
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
     private fun sha(b: ByteArray) = hex(MessageDigest.getInstance("SHA-256").digest(b))
 
-    private fun certs(pi: PackageInfo): List<String> {
+    fun certs(pi: PackageInfo): List<String> {
         val s = if (Build.VERSION.SDK_INT >= 28) pi.signingInfo?.apkContentsSigners else pi.signatures
         return s?.map { sha(it.toByteArray()) } ?: emptyList()
     }

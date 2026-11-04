@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -154,7 +155,7 @@ class MainActivity : ComponentActivity() {
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 listOf("Scan" to Icons.Default.Search, "Monitor" to Icons.Default.Lock,
-                    "History" to Icons.Default.DateRange, "Settings" to Icons.Default.Settings)
+                    "History" to Icons.Default.DateRange, "Access" to Icons.Default.Warning, "Settings" to Icons.Default.Settings)
                     .forEachIndexed { i, (l, ic) ->
                         NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(ic, l) }, label = { Text(l, fontSize = 11.sp) })
                     }
@@ -211,6 +212,10 @@ class MainActivity : ComponentActivity() {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("${scans.size} scans", Modifier.weight(1f))
                             TextButton({ byRisk = !byRisk }) { Text(if (byRisk) "Riskiest first" else "Newest first") }
+                            TextButton({
+                                c.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                                    .putExtra(Intent.EXTRA_TEXT, scans.joinToString("\n") { "${it.score}  ${it.name} (${it.pkg})" }), null))
+                            }) { Text("Export") }
                             TextButton({ scope.launch { dao.clear() } }) { Text("Clear") }
                         }
                     }
@@ -229,6 +234,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                3 -> AccessTab(prefs)
                 else -> SettingsTab(prefs)
             }
         }
@@ -258,6 +264,9 @@ class MainActivity : ComponentActivity() {
                 Text("Allow usage access so Sentinel can read per-app network totals.", fontSize = 13.sp)
                 Button({ c.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("Open usage access") }
             }
+        }
+        if (apps.any { it.flags.isNotEmpty() }) item {
+            OutlinedButton({ apps.filter { it.flags.isNotEmpty() }.forEach { onBlock(it.pkg, true) } }, Modifier.fillMaxWidth()) { Text("Block all flagged apps") }
         }
         items(if (only) apps.filter { it.flags.isNotEmpty() } else apps, key = { it.pkg }) { a ->
             Panel {
@@ -298,6 +307,45 @@ class MainActivity : ComponentActivity() {
         Panel {
             Text("Usage access", fontWeight = FontWeight.Bold)
             Button({ c.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("Open usage access") }
+        }
+    }
+}
+
+@Composable fun AccessTab(prefs: SharedPreferences) {
+    val c = LocalContext.current
+    var items by remember { mutableStateOf(Access.privileged(c)) }
+    var res by remember { mutableStateOf<List<Pair<Int, String>>?>(null) }
+    var msg by remember { mutableStateOf("") }
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
+        item {
+            Panel {
+                Text("Changes since baseline", fontWeight = FontWeight.Bold)
+                Text("Save a baseline while your phone is clean. Later, check for updates signed by a different key, new permissions and new apps.", fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton({ msg = "Baseline saved for ${Access.saveBaseline(c, prefs)} apps"; res = null }, Modifier.weight(1f)) { Text("Save baseline") }
+                    Button({
+                        val r = Access.checkBaseline(c, prefs)
+                        if (r == null) msg = "Save a baseline first" else { res = r; msg = if (r.isEmpty()) "No changes" else "${r.size} changes" }
+                    }, Modifier.weight(1f)) { Text("Check now") }
+                }
+                if (msg.isNotEmpty()) Text(msg, fontSize = 13.sp)
+                res?.forEach { (s, t) -> Text("● $t", color = if (s == 2) Red else Amber, fontSize = 13.sp) }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Powerful access that is ON", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                TextButton({ items = Access.privileged(c) }) { Text("Refresh") }
+            }
+        }
+        items(items) { p ->
+            Panel {
+                Text(p.title, fontWeight = FontWeight.Bold)
+                Text(p.note, fontSize = 12.sp)
+                if (p.apps.isEmpty()) Text("No third-party apps", fontSize = 12.sp, color = Green)
+                else Text(p.apps.joinToString(", "), color = Amber, fontSize = 13.sp)
+                TextButton({ try { c.startActivity(Intent(p.action)) } catch (_: Exception) {} }) { Text("Review") }
+            }
         }
     }
 }
