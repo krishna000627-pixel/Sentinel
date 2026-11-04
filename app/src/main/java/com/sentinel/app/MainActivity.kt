@@ -45,10 +45,24 @@ private fun sc(s: Int) = if (s >= 55) Red else if (s >= 25) Amber else Green
 private fun lvl(s: Int) = if (s >= 55) "High risk" else if (s >= 25) "Medium risk" else "Low risk"
 
 class MainActivity : ComponentActivity() {
+    private val incoming = mutableStateOf<Uri?>(null)
+
+    @Suppress("DEPRECATION")
+    private fun pick(i: Intent?) {
+        incoming.value = when (i?.action) {
+            Intent.ACTION_SEND -> i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            Intent.ACTION_VIEW -> i.data
+            else -> null
+        }
+    }
+
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
-        setContent { MaterialTheme(colorScheme = Dark) { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { App() } } }
+        pick(intent)
+        setContent { MaterialTheme(colorScheme = Dark) { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { App(incoming) } } }
     }
+
+    override fun onNewIntent(i: Intent) { super.onNewIntent(i); pick(i) }
 }
 
 @Composable private fun Panel(mod: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) =
@@ -56,7 +70,7 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
     }
 
-@Composable fun App() {
+@Composable fun App(incoming: MutableState<Uri?>) {
     val c = LocalContext.current; val scope = rememberCoroutineScope()
     val dao = remember { Db.get(c).dao() }
     val prefs = remember { c.getSharedPreferences("s", 0) }
@@ -66,6 +80,8 @@ class MainActivity : ComponentActivity() {
     var err by remember { mutableStateOf<String?>(null) }
     var apk by remember { mutableStateOf<String?>(null) }
     var ref by remember { mutableStateOf<String?>(null) }
+    var audit by remember { mutableStateOf("") }
+    var byRisk by remember { mutableStateOf(false) }
     val blocked by remember { dao.blocks() }.collectAsState(emptyList())
     val scans by remember { dao.scans() }.collectAsState(emptyList())
 
@@ -99,6 +115,34 @@ class MainActivity : ComponentActivity() {
         if (blocked.isNotEmpty() && i != null) vpnLauncher.launch(i) else Monitor.applyVpn(c, blocked)
     }
 
+    LaunchedEffect(incoming.value) {
+        incoming.value?.let { u ->
+            incoming.value = null
+            try {
+                val p = withContext(Dispatchers.IO) { copy(u, "scan.apk") }
+                apk = p; run(p, null)
+            } catch (e: Exception) { err = "Could not open that file" }
+        }
+    }
+    fun auditAll() {
+        scope.launch {
+            busy = true; err = null
+            val pm = c.packageManager
+            val list = withContext(Dispatchers.IO) {
+                pm.getInstalledApplications(0).filter { (it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 && it.packageName != c.packageName }
+            }
+            var n = 0
+            for (a in list) {
+                n++; audit = "Auditing $n/${list.size}: ${a.loadLabel(pm)}"
+                try {
+                    val r = ApkScanner.scan(c, a.sourceDir, null, "", "")
+                    dao.add(ScanEntity(name = r.name, pkg = r.pkg, score = r.score, text = r.text(), time = System.currentTimeMillis()))
+                } catch (_: Exception) {}
+            }
+            audit = ""; busy = false; byRisk = true; tab = 2
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -128,7 +172,9 @@ class MainActivity : ComponentActivity() {
                                 OutlinedButton({ pickRef.launch(arrayOf("*/*")) }, Modifier.weight(1f)) { Text(if (ref == null) "Original (optional)" else "Original ✓", maxLines = 1) }
                             }
                             Button({ run(apk!!, ref) }, Modifier.fillMaxWidth(), enabled = apk != null && !busy) { Text(if (busy) "Scanning…" else "Scan") }
+                            OutlinedButton({ auditAll() }, Modifier.fillMaxWidth(), enabled = !busy) { Text("Audit all installed apps") }
                             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                            if (audit.isNotEmpty()) Text(audit, fontSize = 12.sp, maxLines = 1)
                             err?.let { Text(it, color = Red, fontSize = 13.sp) }
                         }
                     }
@@ -144,6 +190,10 @@ class MainActivity : ComponentActivity() {
                                         Text("${r.findings.count { it.sev == 2 }} serious, ${r.findings.count { it.sev == 1 }} warnings", fontSize = 12.sp)
                                     }
                                 }
+                                TextButton({
+                                    c.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                                        .putExtra(Intent.EXTRA_TEXT, "Sentinel: ${r.name} ${r.score}/100 (${lvl(r.score)})\n" + r.text()), null))
+                                }) { Text("Share report") }
                                 r.findings.forEach { f ->
                                     Row {
                                         Text(if (f.sev == 0) "○" else "●", color = if (f.sev == 2) Red else if (f.sev == 1) Amber else Color.Gray, fontSize = 12.sp)
@@ -160,10 +210,11 @@ class MainActivity : ComponentActivity() {
                     item {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("${scans.size} scans", Modifier.weight(1f))
+                            TextButton({ byRisk = !byRisk }) { Text(if (byRisk) "Riskiest first" else "Newest first") }
                             TextButton({ scope.launch { dao.clear() } }) { Text("Clear") }
                         }
                     }
-                    items(scans, key = { it.id }) { s ->
+                    items(if (byRisk) scans.sortedByDescending { it.score } else scans, key = { it.id }) { s ->
                         var open by remember { mutableStateOf(false) }
                         Panel(Modifier.clickable { open = !open }) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -192,11 +243,13 @@ class MainActivity : ComponentActivity() {
         ok = Monitor.hasUsage(c)
         if (ok) scope.launch { apps = withContext(Dispatchers.Default) { Monitor.load(c) } }
     }
+    var only by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { reload() }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Network use, last 24h", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                TextButton({ only = !only }) { Text(if (only) "All apps" else "Flagged only") }
                 TextButton({ reload() }) { Text("Refresh") }
             }
         }
@@ -206,7 +259,7 @@ class MainActivity : ComponentActivity() {
                 Button({ c.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("Open usage access") }
             }
         }
-        items(apps, key = { it.pkg }) { a ->
+        items(if (only) apps.filter { it.flags.isNotEmpty() } else apps, key = { it.pkg }) { a ->
             Panel {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

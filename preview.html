@@ -1,0 +1,50 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sentinel new theme preview</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap">
+<style>
+:root,[data-t=a]{--bg:#E8EDF1;--sf:#F7F9FA;--tx:#101B33;--mu:#55627A;--ln:#101B33;--ok:#0F8F7A;--wn:#C77700;--bd:#D6322B;--r:6px;--bw:1.5px;--sh:none;color-scheme:light}
+[data-t=b]{--bg:#0E1330;--sf:#171E45;--tx:#E9ECFF;--mu:#9AA3D6;--ln:#2B3566;--ok:#8EE3F5;--wn:#FFD166;--bd:#FF7A6B;--r:18px;--bw:1px;--sh:0 0 0 4px rgba(142,227,245,.06);color-scheme:dark}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:520px;padding:12px;background:var(--bg);color:var(--tx);font:14px/1.45 "Bricolage Grotesque",system-ui,sans-serif}
+.pick{display:flex;gap:8px;margin-bottom:12px}.pick button{flex:1;font:inherit;font-weight:600;padding:8px;border-radius:var(--r);border:var(--bw) solid var(--ln);background:var(--sf);color:var(--tx)}
+.pick button[aria-pressed=true]{background:var(--tx);color:var(--bg)}
+.hd{display:flex;align-items:center;gap:8px;margin-bottom:10px}.hd svg{width:34px;height:34px;color:var(--ok)}.hd b{font-size:22px;font-weight:800}
+.hd small{color:var(--mu);margin-left:auto}
+.card{background:var(--sf);border:var(--bw) solid var(--ln);border-radius:var(--r);box-shadow:var(--sh);padding:12px;margin-bottom:10px}
+.btns{display:flex;gap:8px;margin-top:8px}.btns span{flex:1;text-align:center;padding:8px;border:var(--bw) solid var(--ln);border-radius:var(--r);font-weight:600}
+.btns .go{background:var(--tx);color:var(--bg)}
+.rep{display:flex;gap:14px;align-items:center}
+.stamp{flex:none;width:84px;height:84px;border-radius:50%;border:3px double var(--bd);color:var(--bd);display:grid;place-items:center;text-align:center;transform:rotate(-7deg);line-height:1}
+.stamp b{font-size:32px;font-weight:800;display:block}.stamp i{font-style:normal;font-size:10px;font-weight:600}
+.f{margin:4px 0;font-size:13px}.f:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;background:var(--mu)}
+.f.d:before{background:var(--bd)}.f.w:before{background:var(--wn)}.f.k:before{background:var(--ok)}
+.row{display:flex;align-items:center;gap:10px}.row>div{flex:1}.row small{color:var(--mu)}
+.tg{width:42px;height:24px;border-radius:12px;background:var(--bd);position:relative}.tg:after{content:"";position:absolute;right:3px;top:3px;width:18px;height:18px;border-radius:50%;background:var(--sf)}
+nav{display:flex;justify-content:space-around;padding:10px 4px;border-top:var(--bw) solid var(--ln);color:var(--mu);font-weight:600;font-size:12px}nav .on{color:var(--tx);border-bottom:3px solid var(--ok)}
+p{margin:0;color:var(--mu)}
+</style></head><body>
+<div class="pick"><button data-t="a" aria-pressed="true">A · Specimen (light)</button><button data-t="b" aria-pressed="false">B · Abyss (dark)</button></div>
+<svg style="display:none"><symbol id="lg" viewBox="0 0 48 48"><path d="M24 4l17 10v20L24 44 7 34V14z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><circle cx="24" cy="24" r="7" fill="none" stroke="currentColor" stroke-width="3"/><path d="M11 24h8M29 24h8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></symbol></svg>
+<div class="hd"><svg><use href="#lg"/></svg><b>Sentinel</b><small>new logo: lens in a hex frame</small></div>
+
+<div class="card"><b>Scan an APK</b><p>Open one from your files app, or pick it here.</p>
+<div class="btns"><span>Pick APK</span><span>Original</span></div><div class="btns"><span class="go">Scan</span><span>Audit all apps</span></div></div>
+
+<div class="card"><div class="rep"><div class="stamp"><div><b>72</b><i>HIGH RISK</i></div></div>
+<div><b>Cool Game Mod</b><p>com.cool.game</p><p>4 serious, 3 warnings</p></div></div>
+<div class="f d">Re-signed: certificate 9f3a… differs from original c41b…</div>
+<div class="f d">Crypto-miner strings in code: stratum+tcp, xmrig</div>
+<div class="f w">5 trackers: AppLovin, Unity Ads, Facebook Ads</div>
+<div class="f k">No wallet addresses found</div></div>
+
+<div class="card row"><div><b>Cool Game Mod</b><br><small>↑ 48.2 MB · ↓ 3.1 MB · bg↑ 41.0 MB</small></div><span class="tg"></span></div>
+<nav><span class="on">Scan</span><span>Monitor</span><span>History</span><span>Settings</span></nav>
+<script>
+const r=document.documentElement,bs=document.querySelectorAll('.pick button');
+function set(t){r.dataset.t=t;bs.forEach(b=>b.setAttribute('aria-pressed',b.dataset.t===t))}
+bs.forEach(b=>b.onclick=()=>set(b.dataset.t));
+set(matchMedia('(prefers-color-scheme: dark)').matches?'b':'a');
+</script></body></html>
