@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sentinel v1 preview</title>
+<style>
+:root{--bg:#0B0F14;--sf:#131A22;--sv:#1B242E;--tx:#E6EDF3;--mu:#8B98A5;--ok:#3DDC97;--wn:#FFB84D;--bd:#FF5C5C;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0 auto;max-width:560px;padding:14px;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,sans-serif}
+h1{font-size:22px;margin:0 0 2px}h2{font-size:15px;margin:22px 0 8px}p{margin:0;color:var(--mu)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.card{background:var(--sf);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.sw{width:64px}.sw i{display:block;height:40px;border-radius:8px;border:1px solid #2a3643}.sw span{font-size:11px;color:var(--mu)}
+.ic{width:72px;height:72px;background:var(--bg);display:grid;place-items:center;border:1px solid #2a3643}
+.big{font-size:38px;font-weight:700;line-height:1}
+.f{font-size:13px;margin:3px 0}.d{color:var(--bd)}.w{color:var(--wn)}
+.sw2{width:40px;height:22px;border-radius:11px;background:var(--ok);position:relative;display:inline-block}.sw2:after{content:"";position:absolute;right:3px;top:3px;width:16px;height:16px;border-radius:50%;background:var(--bg)}
+</style></head><body>
+<div class="row"><svg width="56" height="56" viewBox="26 20 56 68"><path fill="#3DDC97" d="M54,26 L76,34 L76,52 C76,66 66,76 54,82 C42,76 32,66 32,52 L32,34 Z"/><path d="M43,53 L51,61 L66,44" fill="none" stroke="#0B0F14" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<div><h1>Sentinel</h1><p>Mod APK scanner. Logo and theme as built into v1.</p></div></div>
+
+<h2>Theme</h2>
+<div class="row"><div class="sw"><i style="background:#0B0F14"></i><span>Background</span></div><div class="sw"><i style="background:#131A22"></i><span>Surface</span></div><div class="sw"><i style="background:#1B242E"></i><span>Raised</span></div><div class="sw"><i style="background:#3DDC97"></i><span>Safe</span></div><div class="sw"><i style="background:#FFB84D"></i><span>Warning</span></div><div class="sw"><i style="background:#FF5C5C"></i><span>Danger</span></div></div>
+
+<h2>App icon shapes</h2>
+<div class="row"><div class="ic" style="border-radius:50%"><svg width="48" height="58" viewBox="26 20 56 68"><path fill="#3DDC97" d="M54,26 L76,34 L76,52 C76,66 66,76 54,82 C42,76 32,66 32,52 L32,34 Z"/><path d="M43,53 L51,61 L66,44" fill="none" stroke="#0B0F14" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+<div class="ic" style="border-radius:22px"><svg width="48" height="58" viewBox="26 20 56 68"><path fill="#3DDC97" d="M54,26 L76,34 L76,52 C76,66 66,76 54,82 C42,76 32,66 32,52 L32,34 Z"/><path d="M43,53 L51,61 L66,44" fill="none" stroke="#0B0F14" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+
+<h2>Scan report</h2>
+<div class="card"><div class="row"><div class="big d">72</div><div><b class="d">High risk</b><p>Cool Game Mod (com.cool.game)</p><p>4 serious, 3 warnings</p></div></div>
+<div class="f d">● Re-signed: certificate 9f3a… differs from original c41b…</div>
+<div class="f d">● Crypto-miner strings in code: stratum+tcp, xmrig</div>
+<div class="f w">● 5 trackers/ad SDKs: AppLovin, Unity Ads, Facebook Ads…</div>
+<div class="f w">● Mod adds 3 permissions: SYSTEM_ALERT_WINDOW, READ_SMS…</div>
+<div class="f">○ VirusTotal has never seen this exact file</div></div>
+
+<h2>Monitor row</h2>
+<div class="card row"><div style="flex:1"><b>Cool Game Mod</b><div class="f">↑ 48.2 MB &nbsp; ↓ 3.1 MB &nbsp; bg↑ 41.0 MB</div><div class="f d">● 41.0 MB sent while in background</div></div><div style="text-align:center"><span class="sw2"></span><div style="font-size:10px">Block</div></div></div>
+</body></html>

@@ -1,0 +1,26 @@
+Firebase Analytics|com/google/firebase/analytics,com/google/android/gms/measurement
+Google AdMob|com/google/android/gms/ads
+Facebook Ads|com/facebook/ads
+Facebook Analytics|com/facebook/appevents
+AppsFlyer|com/appsflyer
+Adjust|com/adjust/sdk
+Unity Ads|com/unity3d/ads
+AppLovin|com/applovin
+IronSource|com/ironsource
+Vungle|com/vungle
+Chartboost|com/chartboost
+InMobi|com/inmobi
+Mintegral|com/mbridge
+Pangle|com/bytedance/sdk/openadsdk
+StartApp|com/startapp
+Flurry|com/flurry
+Mixpanel|com/mixpanel
+Amplitude|com/amplitude
+Crashlytics|com/crashlytics
+Branch|io/branch
+OneSignal|com/onesignal
+Yandex Metrica|com/yandex/metrica
+Tapjoy|com/tapjoy
+Fyber|com/fyber
+AdColony|com/adcolony
+Smaato|com/smaato
