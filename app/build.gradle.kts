@@ -10,8 +10,8 @@ android {
         applicationId = "com.sentinel.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "5"
+        versionCode = 6
+        versionName = "6"
     }
     signingConfigs {
         create("release") {
