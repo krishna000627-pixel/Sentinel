@@ -35,6 +35,7 @@ class ScanWorker(private val c: Context, p: WorkerParameters) : CoroutineWorker(
             ai != null && (ai.flags and ApplicationInfo.FLAG_SYSTEM) == 0 && it.packageName != c.packageName &&
                 (last[it.packageName] ?: -1L) < it.lastUpdateTime
         }
+        val safe = dao.safeNow().toSet()
         val total = todo.size
         val done = AtomicInteger(0)
         val risky = java.util.Collections.synchronizedList(ArrayList<String>())
@@ -48,7 +49,7 @@ class ScanWorker(private val c: Context, p: WorkerParameters) : CoroutineWorker(
                         try {
                             val r = ApkScanner.scanInstalled(c, pi.packageName)
                             dao.add(ScanEntity(name = r.name, pkg = r.pkg, score = r.score, text = r.text(), time = System.currentTimeMillis()))
-                            if (r.score >= 55) risky.add(r.name)
+                            if (r.score >= 55 && r.pkg !in safe) risky.add(r.name)
                         } catch (e: CancellationException) { throw e } catch (_: Exception) {}
                         setProgress(workDataOf("done" to done.incrementAndGet(), "total" to total, "label" to label))
                     }

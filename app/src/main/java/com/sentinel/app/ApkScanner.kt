@@ -16,7 +16,8 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipFile
 
-data class Finding(val sev: Int, val text: String, val w: Int)
+/** soft = permissions, trackers and other "might be normal" points. They are capped so they can never reach High risk alone. */
+data class Finding(val sev: Int, val text: String, val w: Int, val soft: Boolean = false)
 data class Report(val name: String, val pkg: String, val score: Int, val findings: List<Finding>)
 
 fun Report.text() = findings.joinToString("\n") { (if (it.sev == 2) "✖ " else if (it.sev == 1) "! " else "· ") + it.text }
@@ -39,7 +40,47 @@ object ApkScanner {
     private val SO_BAD = Regex("miner|xmr|cryptonight|cpuminer|coinhive")
     private val DEX = Regex("classes\\d*\\.dex")
     private val XMR = Regex("4[0-9AB][1-9A-HJ-NP-Za-km-z]{93}")
-    private val BTC = Regex("bc1[a-z0-9]{38,58}")
+    private val BTC = Regex("bc1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{39,87}")
+    private const val B32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+    private val PAY_PKGS = setOf("com.google.android.apps.nbu.paisa.user", "com.phonepe.app", "net.one97.paytm", "in.org.npci.upiapp",
+        "com.paypal.android.p2pmobile", "com.squareup.cash", "com.venmo", "com.samsung.android.spay", "com.google.android.apps.walletnfcrel",
+        "com.mobikwik_new", "com.freecharge.android", "com.dreamplug.androidapp")
+    private val PAY_WORDS = listOf("bank", "wallet", "paisa", "bhim", "payment", "paypal", "paytm", "phonepe", "gpay", "razorpay", "mobikwik", "freecharge")
+    /** Permissions that payment apps normally need (SIM binding, QR scan, contacts, always-on). */
+    private val PAY_OK = setOf("READ_SMS", "RECEIVE_SMS", "SEND_SMS", "CAMERA", "READ_CONTACTS", "ACCESS_BACKGROUND_LOCATION",
+        "QUERY_ALL_PACKAGES", "WAKE_LOCK", "RECEIVE_BOOT_COMPLETED")
+
+    private fun isPayment(pkg: String, label: String): Boolean {
+        if (pkg in PAY_PKGS) return true
+        val segs = pkg.lowercase().split('.')
+        if (segs.any { s -> s == "upi" || s.startsWith("upi") || PAY_WORDS.any { s.contains(it) } }) return true
+        val l = label.lowercase()
+        return PAY_WORDS.any { l.contains(it) } || l.split(' ').any { it == "pay" || it == "upi" }
+    }
+
+    /** True only for a real Bitcoin bech32/bech32m checksum, so hex hashes starting with "bc1" no longer count. */
+    private fun bech32ok(a: String): Boolean {
+        val gen = intArrayOf(0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3)
+        val v = ArrayList<Int>()
+        for (ch in "bc") v += ch.code shr 5
+        v += 0
+        for (ch in "bc") v += ch.code and 31
+        for (ch in a.substring(3)) { val i = B32.indexOf(ch); if (i < 0) return false; v += i }
+        var chk = 1
+        for (x in v) {
+            val b = chk ushr 25
+            chk = ((chk and 0x1ffffff) shl 5) xor x
+            for (i in 0..4) if (((b ushr i) and 1) == 1) chk = chk xor gen[i]
+        }
+        return chk == 1 || chk == 0x2bc830a3
+    }
+
+    private fun btcIn(t: String): String? {
+        for (m in BTC.findAll(t)) for (len in intArrayOf(42, 62)) {
+            if (m.value.length >= len && bech32ok(m.value.take(len))) return m.value.take(len)
+        }
+        return null
+    }
 
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
     private fun sha(b: ByteArray) = hex(MessageDigest.getInstance("SHA-256").digest(b))
@@ -175,7 +216,7 @@ object ApkScanner {
                     val n = s.read(buf); if (n < 0) break
                     val t = carry + String(buf, 0, n, Charsets.ISO_8859_1)
                     XMR.find(t)?.let { w += "XMR " + it.value.take(10) + "…" }
-                    BTC.find(t)?.let { w += "BTC " + it.value.take(10) + "…" }
+                    btcIn(t)?.let { w += "BTC " + it.take(10) + "…" }
                     carry = t.takeLast(128)
                 }
             }
@@ -208,7 +249,7 @@ object ApkScanner {
             if (cs.toSet() == rc.toSet()) f += Finding(0, "Signed by the same certificate as the original", 0)
             else f += Finding(2, "Re-signed: certificate ${cs.firstOrNull()?.take(16)}… differs from original ${rc.firstOrNull()?.take(16)}…", 20)
             val added = req.toSet() - (ref.requestedPermissions?.toSet() ?: emptySet())
-            if (added.isNotEmpty()) f += Finding(1, "Mod adds ${added.size} permissions: ${added.take(6).joinToString { it.substringAfterLast('.') }}", minOf(added.size * 2, 12))
+            if (added.isNotEmpty()) f += Finding(1, "Mod adds ${added.size} permissions: ${added.take(6).joinToString { it.substringAfterLast('.') }}", minOf(added.size * 2, 12), true)
         }
         analyze(c, pi, path, f, vt, mb, false)
     }
@@ -225,10 +266,15 @@ object ApkScanner {
         val name = pi.applicationInfo?.loadLabel(pm)?.toString() ?: pi.packageName
 
         val req = pi.requestedPermissions?.toList() ?: emptyList()
+        val pay = isPayment(pi.packageName, name)
         req.forEach { p ->
             val k = p.substringAfterLast('.')
-            PERMS[k]?.let { f += Finding(if (it.first >= 6) 2 else 1, "Requests $k: ${it.second}", it.first) }
+            PERMS[k]?.let {
+                f += if (pay && k in PAY_OK) Finding(1, "Requests $k: ${it.second} (normal for payment apps)", 1, true)
+                else Finding(if (it.first >= 6) 2 else 1, "Requests $k: ${it.second}", it.first, true)
+            }
         }
+        if (pay) f += Finding(0, "Looks like a payment app: SMS, camera and contacts access is normal here", 0)
         val svc = pi.services ?: emptyArray<ServiceInfo>()
         val rec = pi.receivers ?: emptyArray()
         if (svc.any { it.permission == "android.permission.BIND_ACCESSIBILITY_SERVICE" })
@@ -237,8 +283,11 @@ object ApkScanner {
             f += Finding(2, "Can read all your notifications", 10)
         if (rec.any { it.permission == "android.permission.BIND_DEVICE_ADMIN" })
             f += Finding(2, "Registers as device admin: hard to uninstall", 12)
+        val a11y = svc.any { it.permission == "android.permission.BIND_ACCESSIBILITY_SERVICE" }
+        val overlay = req.any { it.substringAfterLast('.') == "SYSTEM_ALERT_WINDOW" }
+        if (a11y && overlay) f += Finding(2, "Overlay plus accessibility together: the classic banking-trojan combination", 20)
         val exp = svc.count { it.exported && it.permission == null } + rec.count { it.exported && it.permission == null }
-        if (exp > 3) f += Finding(1, "$exp exported services/receivers with no permission guard", minOf(exp, 10))
+        if (exp > 3) f += Finding(1, "$exp exported services/receivers with no permission guard", minOf(exp, 10), true)
 
         val m = matcher(c)
         val found = BooleanArray(MINER.size + m.names.size)
@@ -258,7 +307,7 @@ object ApkScanner {
         if (hits.isNotEmpty()) f += Finding(2, "Crypto-miner strings in code: ${hits.joinToString()}", minOf(hits.size * 12, 40))
         if (wallets.isNotEmpty()) f += Finding(2, "Crypto wallet address inside code: ${wallets.joinToString()}", 15)
         if (badSo.isNotEmpty()) f += Finding(2, "Suspicious native libraries: ${badSo.take(4).joinToString()}", 15)
-        if (trHit.isNotEmpty()) f += Finding(1, "${trHit.size} trackers/ad SDKs: ${trHit.take(8).joinToString()}", minOf(trHit.size * 2, 16))
+        if (trHit.isNotEmpty()) f += Finding(1, "${trHit.size} trackers/ad SDKs: ${trHit.take(8).joinToString()}", minOf(trHit.size * 2, 16), true)
         else f += Finding(0, "No known trackers found", 0)
 
         if (!quick) {
@@ -281,6 +330,8 @@ object ApkScanner {
             } catch (_: Exception) { f += Finding(0, "MalwareBazaar lookup failed: offline?", 0) }
             f += Finding(0, "SHA-256 ${h.take(16)}…", 0)
         }
-        return Report(name, pi.packageName, minOf(100, f.sumOf { it.w }), f.sortedByDescending { it.sev * 100 + it.w })
+        val hardPts = f.filter { !it.soft }.sumOf { it.w }
+        val softPts = minOf(f.filter { it.soft }.sumOf { it.w }, if (pay) 20 else 40)
+        return Report(name, pi.packageName, minOf(100, hardPts + softPts), f.sortedByDescending { it.sev * 100 + it.w })
     }
 }
