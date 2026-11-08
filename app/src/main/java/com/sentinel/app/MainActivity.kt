@@ -18,6 +18,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
@@ -152,6 +153,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
     var auditLabel by remember { mutableStateOf("") }
     var lastAudit by remember { mutableStateOf(prefs.getString("last_audit", "") ?: "") }
     var rescanning by remember { mutableStateOf<String?>(null) }
+    var detail by rememberSaveable { mutableStateOf<String?>(null) }
     val blocked by remember { dao.blocks() }.collectAsState(emptyList())
     val scans by remember { dao.scans() }.collectAsState(emptyList())
     val safeList by remember { dao.safes() }.collectAsState(emptyList())
@@ -181,7 +183,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
             busy = true; err = null
             try {
                 val r = ApkScanner.scan(c, path, refP, prefs.getString("vt", "")!!, prefs.getString("mb", "")!!)
-                report = r; page = "scan"
+                report = r; detail = null; page = "scan"
                 dao.add(r.entity())
             } catch (e: Exception) { err = e.message ?: "Scan failed" }
             busy = false
@@ -238,25 +240,30 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
         }
     }
 
-    BackHandler(enabled = page != "home") { page = "home" }
+    BackHandler(enabled = detail != null || page != "home") { if (detail != null) detail = null else page = "home" }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (page == "home") {
+                if (detail == null && page == "home") {
                     Spacer(Modifier.width(4.dp))
                     Image(painterResource(R.drawable.ic_logo), null, Modifier.size(40.dp))
                     Text("Sentinel", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 } else {
-                    IconButton({ page = "home" }) { Icon(Icons.Default.ArrowBack, "Back") }
-                    Text(PAGE_TITLES[page] ?: "", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    IconButton({ if (detail != null) detail = null else page = "home" }) { Icon(Icons.Default.ArrowBack, "Back") }
+                    Text(if (detail != null) "App details" else PAGE_TITLES[page] ?: "", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
     ) { pad ->
         Box(Modifier.padding(pad).padding(horizontal = 12.dp)) {
-            when (page) {
+            val d = detail
+            if (d != null) AppDetail(
+                pkg = d, scans = scans.filter { it.pkg == d }, installed = d in inst, safe = d in safe, rescanning = rescanning, blocked = d in blocked,
+                onSafe = { setSafe(d, it) }, onRescan = { rescan(d) },
+                onBlock = { on -> scope.launch { if (on) dao.block(BlockEntity(d)) else dao.unblock(BlockEntity(d)) } }
+            ) else when (page) {
                 "home" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val col = if (high > 0) Red else if (med > 0) Amber else Green
                     Card(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { page = "apps" }, shape = RoundedCornerShape(16.dp),
@@ -349,17 +356,17 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
                         }
                     }
                 }
-                "apps" -> AppsPage(latest, safe, rescanning, ::setSafe, ::rescan)
-                "monitor" -> MonitorTab(blocked, safe, ::setSafe, { p, on -> scope.launch { if (on) dao.block(BlockEntity(p)) else dao.unblock(BlockEntity(p)) } }) { src -> run(src, null) }
-                "history" -> HistoryPage(scans, safe, ::setSafe)
-                "access" -> AccessTab(prefs, safe, ::setSafe)
+                "apps" -> AppsPage(latest, safe, rescanning, ::setSafe, ::rescan) { detail = it }
+                "monitor" -> MonitorTab(blocked, safe, ::setSafe, { p, on -> scope.launch { if (on) dao.block(BlockEntity(p)) else dao.unblock(BlockEntity(p)) } }, { detail = it }) { src -> run(src, null) }
+                "history" -> HistoryPage(scans, safe, ::setSafe) { detail = it }
+                "access" -> AccessTab(prefs, safe, ::setSafe) { detail = it }
                 else -> SettingsTab(prefs, safe.size) { scope.launch { dao.clearSafe() } }
             }
         }
     }
 }
 
-@Composable fun AppsPage(latest: List<ScanEntity>, safe: Set<String>, rescanning: String?, onSafe: (String, Boolean) -> Unit, onRescan: (String) -> Unit) {
+@Composable fun AppsPage(latest: List<ScanEntity>, safe: Set<String>, rescanning: String?, onSafe: (String, Boolean) -> Unit, onRescan: (String) -> Unit, onOpen: (String) -> Unit) {
     var f by remember { mutableIntStateOf(0) }
     val shown = remember(latest, safe, f) {
         when (f) {
@@ -381,9 +388,8 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
                 fontSize = 13.sp, color = Muted, modifier = Modifier.padding(8.dp))
         }
         items(shown, key = { it.pkg }) { s ->
-            var open by remember { mutableStateOf(false) }
             val isSafe = s.pkg in safe
-            Panel(Modifier.clickable { open = !open }) {
+            Panel(Modifier.clickable { onOpen(s.pkg) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${s.score}", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = if (isSafe) Green else sc(s.score), modifier = Modifier.width(52.dp))
                     Column(Modifier.weight(1f)) {
@@ -394,9 +400,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
                         Text(s.pkg, fontSize = 11.sp, color = Muted, maxLines = 1)
                     }
                 }
-                if (!open) {
-                    s.text.lines().filter { it.startsWith("✖") || it.startsWith("!") }.take(2).forEach { Text(it.drop(2), fontSize = 12.sp, color = Muted, maxLines = 1) }
-                } else Findings(s.text)
+                s.text.lines().filter { it.startsWith("✖") || it.startsWith("!") }.take(2).forEach { Text(it.drop(2), fontSize = 12.sp, color = Muted, maxLines = 1) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     SafeButton(isSafe) { onSafe(s.pkg, !isSafe) }
                     TextButton({ onRescan(s.pkg) }, enabled = rescanning == null) { Text(if (rescanning == s.pkg) "Checking…" else "Rescan", fontSize = 12.sp) }
@@ -406,7 +410,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
     }
 }
 
-@Composable fun HistoryPage(scans: List<ScanEntity>, safe: Set<String>, onSafe: (String, Boolean) -> Unit) {
+@Composable fun HistoryPage(scans: List<ScanEntity>, safe: Set<String>, onSafe: (String, Boolean) -> Unit, onOpen: (String) -> Unit) {
     val c = LocalContext.current; val scope = rememberCoroutineScope()
     val dao = remember { Db.get(c).dao() }
     var byRisk by remember { mutableStateOf(false) }
@@ -444,9 +448,8 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
             }
         }
         items(shown, key = { it.id }) { s ->
-            var open by remember { mutableStateOf(false) }
             val isSafe = s.pkg in safe
-            Panel(Modifier.clickable { open = !open }) {
+            Panel(Modifier.clickable { onOpen(s.pkg) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${s.score}", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = if (isSafe) Green else sc(s.score), modifier = Modifier.width(52.dp))
                     Column(Modifier.weight(1f)) {
@@ -456,18 +459,14 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
                         }
                         Text(fmt(s.time), fontSize = 11.sp, color = Muted)
                     }
-                    Text(if (open) "▲" else "▼", color = Muted, fontSize = 11.sp)
-                }
-                if (open) {
-                    Findings(s.text)
-                    SafeButton(isSafe) { onSafe(s.pkg, !isSafe) }
+                    Text("›", color = Muted, fontSize = 20.sp)
                 }
             }
         }
     }
 }
 
-@Composable fun MonitorTab(blocked: List<String>, safe: Set<String>, onSafe: (String, Boolean) -> Unit, onBlock: (String, Boolean) -> Unit, onScan: (String) -> Unit) {
+@Composable fun MonitorTab(blocked: List<String>, safe: Set<String>, onSafe: (String, Boolean) -> Unit, onBlock: (String, Boolean) -> Unit, onOpen: (String) -> Unit, onScan: (String) -> Unit) {
     val c = LocalContext.current; val scope = rememberCoroutineScope()
     var apps by remember { mutableStateOf<List<AppNet>>(emptyList()) }
     var ok by remember { mutableStateOf(Monitor.hasUsage(c)) }
@@ -499,7 +498,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
             val isSafe = a.pkg in safe
             Panel {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+                    Column(Modifier.weight(1f).clickable { onOpen(a.pkg) }) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(a.label, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
                             if (isSafe) Tag("SAFE", Green)
@@ -558,7 +557,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
     }
 }
 
-@Composable fun AccessTab(prefs: SharedPreferences, safe: Set<String>, onSafe: (String, Boolean) -> Unit) {
+@Composable fun AccessTab(prefs: SharedPreferences, safe: Set<String>, onSafe: (String, Boolean) -> Unit, onOpen: (String) -> Unit) {
     val c = LocalContext.current; val scope = rememberCoroutineScope()
     var list by remember { mutableStateOf<List<Pair<String, Pair<String, Set<String>>>>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -601,7 +600,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
         if (loading) item { Text("Loading…", fontSize = 12.sp) }
         else if (visible.isEmpty()) item { Text("No unreviewed app has powerful access", fontSize = 12.sp, color = Green) }
         items(visible, key = { it.first }) { p ->
-            Panel {
+            Panel(Modifier.clickable { onOpen(p.first) }) {
                 Text(p.second.first, fontWeight = FontWeight.Bold)
                 Text(p.second.second.joinToString(", "), color = Amber, fontSize = 13.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -621,6 +620,111 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "monitor"
                     }
                     Text(p.second.second.joinToString(", "), color = Muted, fontSize = 13.sp)
                     SafeButton(true) { onSafe(p.first, false) }
+                }
+            }
+        }
+    }
+}
+
+@Suppress("DEPRECATION")
+@Composable fun AppDetail(pkg: String, scans: List<ScanEntity>, installed: Boolean, safe: Boolean, rescanning: String?, blocked: Boolean,
+                          onSafe: (Boolean) -> Unit, onRescan: () -> Unit, onBlock: (Boolean) -> Unit) {
+    val c = LocalContext.current
+    val pm = c.packageManager
+    val info = remember(pkg, installed) { try { pm.getPackageInfo(pkg, 0) } catch (_: Exception) { null } }
+    val cur = scans.firstOrNull()
+    val name = cur?.name ?: info?.applicationInfo?.loadLabel(pm)?.toString() ?: pkg
+    var net by remember(pkg) { mutableStateOf<AppNet?>(null) }
+    var usageOk by remember { mutableStateOf(Monitor.hasUsage(c)) }
+    LaunchedEffect(pkg) {
+        usageOk = Monitor.hasUsage(c)
+        if (usageOk && installed) net = withContext(Dispatchers.Default) { Monitor.load(c).firstOrNull { it.pkg == pkg } }
+    }
+    val day = DateFormat.getDateInstance(DateFormat.SHORT)
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
+        item {
+            Panel {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (cur != null) "${cur.score}" else "–", fontSize = 44.sp, fontWeight = FontWeight.Bold,
+                        color = if (cur == null) Muted else if (safe) Green else sc(cur.score), modifier = Modifier.width(76.dp))
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(name, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2, modifier = Modifier.weight(1f, fill = false))
+                            if (safe) Tag("SAFE", Green)
+                        }
+                        Text(pkg, fontSize = 11.sp, color = Muted)
+                        if (cur != null) Text(if (safe) "Marked safe (scored ${lvl(cur.score).lowercase()})" else lvl(cur.score),
+                            color = if (safe) Green else sc(cur.score), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+                if (info != null) Text("Version ${info.versionName ?: "?"} · installed ${day.format(Date(info.firstInstallTime))} · updated ${day.format(Date(info.lastUpdateTime))}", fontSize = 12.sp, color = Muted)
+                else Text("No longer installed. Showing saved results.", fontSize = 12.sp, color = Muted)
+                if (scans.size >= 2) {
+                    val first = scans.last(); val d = scans.first().score - first.score
+                    Text("${scans.size} scans since ${day.format(Date(first.time))}: " +
+                        (if (d > 0) "risk went up by $d" else if (d < 0) "risk went down by ${-d}" else "same score"), fontSize = 12.sp,
+                        color = if (d > 0) Red else if (d < 0) Green else Muted)
+                }
+            }
+        }
+        item {
+            Panel {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SafeButton(safe) { onSafe(!safe) }
+                    if (installed) Button({ onRescan() }, enabled = rescanning == null, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)) {
+                        Text(if (rescanning == pkg) "Checking…" else if (cur == null) "Scan now" else "Rescan", fontSize = 12.sp)
+                    }
+                    if (installed) OutlinedButton({
+                        try { c.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))) } catch (_: Exception) {}
+                    }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)) { Text("App settings", fontSize = 12.sp) }
+                }
+                if (installed) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Block this app's internet", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Uses Sentinel's local VPN. Nothing leaves your phone.", fontSize = 11.sp, color = Muted)
+                    }
+                    Switch(checked = blocked, onCheckedChange = onBlock)
+                }
+            }
+        }
+        if (installed) item {
+            Panel {
+                Title("Network, last 24h")
+                val n = net
+                if (!usageOk) {
+                    Text("Allow usage access to see this app's network use.", fontSize = 12.sp, color = Muted)
+                    OutlinedButton({ c.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("Open usage access") }
+                } else if (n == null) Text("Loading…", fontSize = 12.sp, color = Muted)
+                else {
+                    Text("↑ ${mb(n.tx)}   ↓ ${mb(n.rx)}   bg↑ ${mb(n.bgTx)}", fontSize = 13.sp)
+                    if (n.flags.isEmpty()) Text("Nothing unusual", fontSize = 12.sp, color = Green)
+                    else n.flags.forEach { Text("● $it", color = sc(n.score), fontSize = 12.sp) }
+                }
+            }
+        }
+        if (cur != null) item {
+            Panel {
+                Title("Latest findings")
+                Findings(cur.text)
+            }
+        } else item { Text("Not scanned yet.", fontSize = 13.sp, color = Muted, modifier = Modifier.padding(8.dp)) }
+        if (scans.isNotEmpty()) {
+            item { Title("Scan history (${scans.size})") }
+            itemsIndexed(scans, key = { _, s -> s.id }) { i, s ->
+                var open by remember { mutableStateOf(false) }
+                val older = scans.getOrNull(i + 1)
+                Panel(Modifier.clickable { open = !open }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${s.score}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = sc(s.score), modifier = Modifier.width(52.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(fmt(s.time), fontSize = 13.sp)
+                            val dl = if (older == null) 0 else s.score - older.score
+                            Text(if (older == null) "First scan" else if (dl > 0) "▲ $dl higher than before" else if (dl < 0) "▼ ${-dl} lower than before" else "Same score, findings changed",
+                                fontSize = 11.sp, color = if (older == null) Muted else if (dl > 0) Red else if (dl < 0) Green else Muted)
+                        }
+                        Text(if (open) "▲" else "▼", color = Muted, fontSize = 11.sp)
+                    }
+                    if (open) Findings(s.text)
                 }
             }
         }
