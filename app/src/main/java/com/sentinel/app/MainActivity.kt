@@ -24,6 +24,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
@@ -33,6 +36,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.clip
@@ -164,7 +168,7 @@ class MainActivity : ComponentActivity() {
 private val Line: Color get() = if (Pal.light) Color(0xFFD9E1E8) else Color(0xFF222D3A)
 private val Blue: Color get() = if (Pal.light) Color(0xFF2F7FE0) else Color(0xFF6AA9FF)
 private val Purple: Color get() = if (Pal.light) Color(0xFF7C4DDB) else Color(0xFFB794F6)
-private val DOCK = setOf("home", "apps", "scan", "more")
+private val DOCK = setOf("home", "apps", "scan", "history", "more")
 
 private fun firstFinding(text: String): String? = text.lines().firstOrNull { it.startsWith("✖") || it.startsWith("!") }?.drop(2)
 
@@ -307,28 +311,38 @@ private fun openSettings(c: android.content.Context, vararg intents: Intent) {
     }
 }
 
-@Composable private fun DockItem(glyph: String, label: String, on: Boolean, cta: Boolean = false, onClick: () -> Unit) {
-    Column(Modifier.width(70.dp).clip(RoundedCornerShape(14.dp)).tap(onClick).padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Box(Modifier.clip(RoundedCornerShape(12.dp))
-            .background(if (on) Green.copy(alpha = 0.16f) else Color.Transparent)
-            .padding(horizontal = 16.dp, vertical = 4.dp)) {
-            Text(glyph, fontSize = if (cta) 24.sp else 18.sp, color = if (cta || on) Green else Muted,
-                fontWeight = if (cta) FontWeight.ExtraBold else FontWeight.Normal)
+@Composable private fun DockItem(icon: ImageVector, label: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(modifier.height(64.dp).tap(onClick), contentAlignment = Alignment.TopCenter) {
+        if (on) Box(Modifier.padding(top = 0.dp).width(28.dp).height(3.dp)
+            .clip(RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp)).background(Green))
+        Column(Modifier.padding(top = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Icon(icon, label, tint = if (on) Green else Muted, modifier = Modifier.size(24.dp))
+            Text(label, fontSize = 11.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) Green else Muted)
         }
-        Text(label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = if (cta || on) Green else Muted)
+    }
+}
+
+@Composable private fun DockScan(on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(modifier.height(84.dp).tap(onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(54.dp).clip(CircleShape).background(MaterialTheme.colorScheme.background).padding(4.dp)
+            .clip(CircleShape).background(Green), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Search, "Scan", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(26.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("Scan", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
     }
 }
 
 @Composable private fun Dock(page: String, onGo: (String) -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-        Row(Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(22.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
-            .border(1.dp, Line, RoundedCornerShape(22.dp)),
-            horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
-            DockItem("⌂", "Home", page == "home") { onGo("home") }
-            DockItem("☰", "Apps", page == "apps") { onGo("apps") }
-            DockItem("⌕", "Scan", page == "scan", cta = true) { onGo("scan") }
-            DockItem("⋯", "More", page == "more") { onGo("more") }
+    Box(Modifier.fillMaxWidth().height(84.dp)) {
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surface))
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(1.dp).background(Line).offset(y = (-63).dp))
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.Bottom) {
+            DockItem(Icons.Default.Home, "Home", page == "home", Modifier.weight(1f)) { onGo("home") }
+            DockItem(Icons.Default.Menu, "Apps", page == "apps", Modifier.weight(1f)) { onGo("apps") }
+            DockScan(page == "scan", Modifier.weight(1f)) { onGo("scan") }
+            DockItem(Icons.Default.DateRange, "History", page == "history", Modifier.weight(1f)) { onGo("history") }
+            DockItem(Icons.Default.MoreVert, "More", page == "more", Modifier.weight(1f)) { onGo("more") }
         }
     }
 }
