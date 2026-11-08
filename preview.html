@@ -1,68 +1,172 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Sentinel v11 preview</title>
+<title>Sentinel redesign preview</title>
 <style>
-:root{--bg:#0B0F14;--sf:#131A22;--sv:#1B242E;--tx:#E8EEF4;--mu:#8D9BAA;--ok:#3DDC97;--wn:#FFB84D;--bd:#FF5C5C;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root{--bg:#0A0E13;--sf:#121921;--sv:#1A232E;--ln:#222D3A;--tx:#E9EFF5;--mu:#8696A7;--ok:#3DDC97;--wn:#FFB84D;--bd:#FF5C5C;--bl:#6AA9FF;--pu:#B794F6;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}*{box-sizing:border-box}
-body{margin:0;background:#05080b;color:var(--tx);font:14px/1.4 system-ui,sans-serif;padding:12px}
-.wrap{display:flex;flex-wrap:wrap;gap:16px;justify-content:center}
-.ph{width:340px;max-width:100%;background:var(--bg);border-radius:22px;padding:10px 12px 16px;border:1px solid #222c37}
-h6{margin:0 0 8px;color:var(--mu);font-weight:600;font-size:12px;text-align:center}
-.top{display:flex;align-items:center;gap:8px;padding:4px 0 10px;font-size:20px;font-weight:700}.top i{font-style:normal;width:34px;height:34px;border-radius:50%;border:3px solid var(--ok);display:grid;place-items:center;color:var(--ok);font-size:14px}
-.back{font-size:22px;width:36px}
-.card{background:var(--sf);border-radius:16px;padding:14px;margin-bottom:10px}
-.sum{background:rgba(255,92,92,.14)}.sum b{font-size:22px;color:var(--bd);display:block}.sum small{color:var(--tx)}.sum em{display:block;font-style:normal;color:var(--mu);font-size:12px;margin-top:2px}
-.g{display:grid;grid-template-columns:1fr 1fr;gap:10px}.t{background:var(--sf);border-radius:16px;height:112px;padding:14px;display:flex;flex-direction:column;justify-content:space-between}
-.t .ic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:18px}.t b{display:block;font-size:16px}.t small{color:var(--mu);font-size:12px}
-.chips{display:flex;gap:8px;margin-bottom:10px}.chip{padding:7px 14px;border-radius:50px;background:var(--sv);font-size:13px}.chip.on{background:rgba(61,220,151,.2);color:var(--ok);font-weight:700}
-.r{display:flex;align-items:center;gap:10px}.sc{font-size:26px;font-weight:700;width:52px}
-.tag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px}
-.mut{color:var(--mu);font-size:12px}.f{font-size:12px;color:var(--mu);margin-top:6px}
-.btn{display:inline-block;border:1px solid #3a4756;border-radius:50px;padding:5px 12px;font-size:12px;margin-top:8px;margin-right:6px}
+body{margin:0;background:#04070a;color:var(--tx);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:14px}
+h1{font-size:16px;margin:0 0 4px;text-align:center}.sub{color:var(--mu);text-align:center;margin:0 0 16px;font-size:12px}
+.wrap{display:flex;flex-wrap:wrap;gap:22px;justify-content:center}
+.col{width:340px;max-width:100%}
+.cap{color:var(--mu);font-size:12px;margin:8px 4px 0}.cap b{color:var(--tx)}
+.ph{background:var(--bg);border-radius:26px;border:1px solid var(--ln);padding:12px 12px 0;height:640px;overflow:hidden;position:relative}
+.sc{height:100%;overflow:hidden;padding-bottom:84px}
+.hd{display:flex;align-items:center;gap:10px;padding:2px 2px 12px}.hd b{font-size:20px;font-weight:800;flex:1}
+.lg{width:34px;height:34px;border-radius:11px;background:rgba(61,220,151,.14);display:grid;place-items:center;color:var(--ok)}
+.ib{width:36px;height:36px;border-radius:12px;background:var(--sf);display:grid;place-items:center;color:var(--mu);font-size:16px}
+.card{background:var(--sf);border-radius:18px;padding:14px;margin-bottom:10px}
+.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mu);font-weight:700;margin:14px 4px 8px}
+.mut{color:var(--mu);font-size:12px}.sm{font-size:12px}
+.btn{display:block;text-align:center;border-radius:14px;padding:12px;font-weight:700;background:var(--ok);color:#06140D}
+.btn.o{background:transparent;border:1px solid var(--ln);color:var(--tx)}.btn.s{padding:8px 14px;display:inline-block;border-radius:12px;font-size:12px}
+.row{display:flex;align-items:center;gap:10px}.row>.g{flex:1;min-width:0}
+.pill{min-width:44px;text-align:center;padding:6px 0;border-radius:12px;font-weight:800;font-size:15px}
+.r{background:rgba(255,92,92,.15);color:var(--bd)}.a{background:rgba(255,184,77,.15);color:var(--wn)}.k{background:rgba(61,220,151,.15);color:var(--ok)}
+.tag{font-size:10px;font-weight:800;padding:2px 7px;border-radius:7px;letter-spacing:.04em}
+.item{display:flex;align-items:center;gap:12px;background:var(--sf);border-radius:16px;padding:12px;margin-bottom:8px;position:relative;overflow:hidden}
+.item:before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:3px;background:var(--c,var(--ln))}
+.item b{display:block;font-size:14px}.item .t{color:var(--mu);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chev{color:var(--mu);font-size:18px}
+.chips{display:flex;gap:8px;margin-bottom:10px;overflow:hidden}.chip{padding:7px 14px;border-radius:50px;background:var(--sv);font-size:13px;white-space:nowrap}.chip.on{background:rgba(61,220,151,.18);color:var(--ok);font-weight:700}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}.stat{background:var(--sf);border-radius:16px;padding:10px 12px}.stat b{font-size:22px;display:block}
+.dock{position:absolute;left:12px;right:12px;bottom:12px;height:64px;border-radius:22px;background:rgba(26,35,46,.96);border:1px solid var(--ln);display:flex;align-items:center;justify-content:space-around;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.dk{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:var(--mu);font-weight:600;width:62px}.dk i{font-style:normal;font-size:18px;line-height:1}
+.dk.on{color:var(--ok)}.dk.on i{background:rgba(61,220,151,.16);border-radius:12px;padding:4px 16px}
+.dk.cta i{background:var(--ok);color:#06140D;border-radius:16px;padding:8px 16px;font-weight:800}.dk.cta{color:var(--ok)}
+.bar{height:6px;border-radius:6px;background:var(--sv);overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;border-radius:6px;background:var(--bl)}
+.sw{width:42px;height:24px;border-radius:12px;background:var(--sv);position:relative;flex:none}.sw:after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:var(--mu)}
+.sw.on{background:rgba(61,220,151,.4)}.sw.on:after{left:21px;background:var(--ok)}
+.f{display:flex;gap:8px;font-size:13px;margin:6px 0}.f:before{content:"";flex:none;width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--mu)}
+.f.d:before{background:var(--bd)}.f.w:before{background:var(--wn)}
+.perm{display:inline-block;font-size:11px;padding:3px 9px;border-radius:50px;background:rgba(255,184,77,.13);color:var(--wn);margin:3px 4px 0 0}
+.perm.d{background:rgba(255,92,92,.13);color:var(--bd)}
+.set .row{padding:12px 14px;border-bottom:1px solid var(--ln)}.set .row:last-child{border:0}.set{background:var(--sf);border-radius:18px;margin-bottom:10px;overflow:hidden}
+.zone{border:1.5px dashed var(--ln);border-radius:18px;padding:22px 14px;text-align:center;margin-bottom:10px;background:var(--sf)}.zone big{font-size:30px;display:block}
+.seg{display:flex;background:var(--sv);border-radius:14px;padding:4px;margin-bottom:12px}.seg span{flex:1;text-align:center;padding:8px;border-radius:11px;font-weight:600;color:var(--mu)}.seg .on{background:var(--bg);color:var(--tx)}
+.prog{height:8px;border-radius:8px;background:var(--sv);overflow:hidden;margin:8px 0 4px}.prog i{display:block;width:62%;height:100%;background:linear-gradient(90deg,var(--ok),#7af0c0);border-radius:8px}
+.hero{text-align:center;padding:18px 14px 14px}.ring{width:150px;height:150px;margin:0 auto;position:relative}.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring div{position:absolute;inset:0;display:grid;place-content:center;text-align:center}.ring b{font-size:34px;line-height:1}.ring span{font-size:11px;color:var(--mu)}
+.legend{display:flex;justify-content:center;gap:14px;margin-top:10px;font-size:12px;color:var(--mu)}.legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.day{font-size:12px;color:var(--mu);font-weight:700;margin:12px 4px 6px}
+.tl{border-left:2px solid var(--ln);margin-left:8px;padding-left:14px}.tl .e{position:relative;margin-bottom:12px}.tl .e:before{content:"";position:absolute;left:-21px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--c)}
 </style></head><body>
+<h1>Sentinel redesign preview</h1>
+<p class="sub">Dark theme, same green. Home has a risk ring, one big Scan button and a floating 4-item dock that can't overflow. Nothing is in the app yet.</p>
 <div class="wrap">
-<div class="ph"><h6>Home (replaces the bottom bar)</h6>
-<div class="top"><i>✓</i>Sentinel</div>
-<div class="card sum"><b>2 high-risk apps</b><small>61 apps checked, 4 more medium, 3 marked safe</small><em>Last check 08/11/26 14:10</em></div>
-<div class="g">
-<div class="t"><div class="ic" style="background:rgba(61,220,151,.16);color:var(--ok)">⌕</div><div><b>Scan</b><small>Check an APK or all apps</small></div></div>
-<div class="t"><div class="ic" style="background:rgba(255,92,92,.16);color:var(--bd)">☰</div><div><b>My apps</b><small>6 to review</small></div></div>
-<div class="t"><div class="ic" style="background:rgba(106,169,255,.16);color:#6AA9FF">🔒</div><div><b>Monitor</b><small>Network use and block</small></div></div>
-<div class="t"><div class="ic" style="background:rgba(183,148,246,.16);color:#B794F6">▦</div><div><b>History</b><small>48 saved results</small></div></div>
-<div class="t"><div class="ic" style="background:rgba(255,184,77,.16);color:var(--wn)">⚠</div><div><b>Access</b><small>Powerful permissions</small></div></div>
-<div class="t"><div class="ic" style="background:rgba(141,155,170,.16);color:var(--mu)">⚙</div><div><b>Settings</b><small>Keys, background, trackers</small></div></div>
-</div></div>
 
-<div class="ph"><h6>My apps → Risky</h6>
-<div class="top"><span class="back">←</span>My apps</div>
-<div class="chips"><span class="chip on">Risky</span><span class="chip">Safe</span><span class="chip">All apps</span></div>
-<div class="card"><div class="r"><span class="sc" style="color:var(--bd)">68</span><div><b>FamApp</b> <span class="tag" style="background:rgba(255,92,92,.18);color:var(--bd)">HIGH RISK</span><div class="mut">com.fam.app</div></div></div>
-<div class="f">Overlay plus accessibility together: the classic banking-trojan combination</div><div class="f">Requests MANAGE_EXTERNAL_STORAGE: access to all files</div>
-<span class="btn">Mark as safe</span><span class="mut">Rescan</span></div>
-<div class="card"><div class="r"><span class="sc" style="color:var(--wn)">34</span><div><b>Termux:API</b> <span class="tag" style="background:rgba(255,184,77,.18);color:var(--wn)">MEDIUM RISK</span><div class="mut">com.termux.api</div></div></div>
-<div class="f">Requests READ_SMS: reads your SMS</div><div class="f">Requests CAMERA: uses the camera</div>
-<span class="btn">Mark as safe</span><span class="mut">Rescan</span></div>
-<div class="card"><div class="r"><span class="sc" style="color:var(--ok)">12</span><div><b>PhonePe</b> <span class="tag" style="background:rgba(61,220,151,.18);color:var(--ok)">SAFE</span><div class="mut">com.phonepe.app</div></div></div>
-<span class="btn">✓ Safe · undo</span></div></div>
-
-<div class="ph"><h6>History (no repeats, filters)</h6>
-<div class="top"><span class="back">←</span>History</div>
-<div class="chips"><span class="chip on">All</span><span class="chip">High</span><span class="chip">Medium</span><span class="chip">Low</span></div>
-<div class="r mut" style="margin-bottom:8px"><span style="flex:1">48 results</span><span>Newest first</span>&nbsp;&nbsp;<span>Export</span>&nbsp;&nbsp;<span>Clear</span></div>
-<div class="card"><div class="r"><span class="sc" style="color:var(--bd)">68</span><div style="flex:1"><b>FamApp</b><div class="mut">08/11/26 14:10</div></div><span class="mut">▲</span></div>
-<div class="f">● Re-signed: certificate differs from original</div><div class="f">● Requests SYSTEM_ALERT_WINDOW: draws over other apps</div><span class="btn">Mark as safe</span></div>
-<div class="card"><div class="r"><span class="sc" style="color:var(--wn)">41</span><div style="flex:1"><b>Clone Phone</b><div class="mut">08/11/26 14:03</div></div><span class="mut">▼</span></div></div>
+<!-- HOME -->
+<div class="col"><div class="ph"><div class="sc">
+<div class="hd"><div class="lg">✓</div><b>Sentinel</b><div class="ib">⚙</div></div>
+<div class="card hero">
+<div class="ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--sv)" stroke-width="12"/>
+<circle cx="60" cy="60" r="46" fill="none" stroke="#3DDC97" stroke-width="12" stroke-linecap="round" stroke-dasharray="254 289" stroke-dashoffset="-32"/>
+<circle cx="60" cy="60" r="46" fill="none" stroke="#FFB84D" stroke-width="12" stroke-linecap="round" stroke-dasharray="15 289" stroke-dashoffset="-13"/>
+<circle cx="60" cy="60" r="46" fill="none" stroke="#FF5C5C" stroke-width="12" stroke-linecap="round" stroke-dasharray="6 289"/></svg>
+<div><b>61</b><span>apps checked</span></div></div>
+<div class="legend"><span><i style="background:var(--bd)"></i>2 high</span><span><i style="background:var(--wn)"></i>4 medium</span><span><i style="background:var(--ok)"></i>55 low</span></div>
+<div class="mut" style="margin-top:8px">Last check today 14:10</div></div>
+<div class="row" style="margin-bottom:4px"><div class="btn g">Scan all apps</div><div class="btn o" style="padding:12px 16px">APK</div></div>
+<div class="lbl">Needs attention</div>
+<div class="item" style="--c:var(--bd)"><span class="pill r">68</span><div class="g"><b>FamApp</b><div class="t">Re-signed certificate differs</div></div><span class="chev">›</span></div>
+<div class="item" style="--c:var(--bd)"><span class="pill r">61</span><div class="g"><b>Clone Phone</b><div class="t">Overlay + accessibility together</div></div><span class="chev">›</span></div>
+<div class="item" style="--c:var(--wn)"><span class="pill a">41</span><div class="g"><b>Termux:API</b><div class="t">Reads SMS · uses camera</div></div><span class="chev">›</span></div>
+<div class="mut" style="text-align:center;margin-top:4px">See all 6 ›</div>
 </div>
-<div class="ph"><h6>NEW: App page (tap any app)</h6>
-<div class="top"><span class="back">←</span>App details</div>
-<div class="card"><div class="r"><span class="sc" style="color:var(--bd);width:76px;font-size:44px">68</span><div><b style="font-size:18px">FamApp</b><div class="mut">com.fam.app</div><b style="color:var(--bd);font-size:13px">High risk</b></div></div>
-<div class="f">Version 3.2 · installed 01/10/26 · updated 05/11/26</div><div class="f" style="color:var(--bd)">3 scans since 01/11/26: risk went up by 27</div></div>
-<div class="card"><span class="btn">Mark as safe</span><span class="btn" style="background:var(--ok);color:#06140D;border-color:var(--ok)">Rescan</span><span class="btn">App settings</span>
-<div class="r" style="margin-top:10px"><div style="flex:1"><b>Block this app's internet</b><div class="mut" style="font-size:11px">Uses Sentinel's local VPN</div></div><span class="mut">⏻</span></div></div>
-<div class="card"><b>Network, last 24h</b><div class="f">↑ 48.2 MB &nbsp; ↓ 3.1 MB &nbsp; bg↑ 41.0 MB</div><div class="f" style="color:var(--bd)">● 41.0 MB sent while in background</div></div>
-<div class="card"><b>Latest findings</b><div class="f">● Re-signed: certificate differs from original</div><div class="f">● Overlay plus accessibility together</div></div>
-<b style="display:block;margin:4px 0 8px">Scan history (3)</b>
-<div class="card"><div class="r"><span class="sc" style="color:var(--bd);font-size:22px;width:52px">68</span><div style="flex:1">08/11/26 14:10<div class="mut" style="color:var(--bd)">▲ 27 higher than before</div></div><span class="mut">▼</span></div></div>
-<div class="card"><div class="r"><span class="sc" style="color:var(--wn);font-size:22px;width:52px">41</span><div style="flex:1">05/11/26 09:02<div class="mut" style="">Same score, findings changed</div></div><span class="mut">▼</span></div></div>
-<div class="card"><div class="r"><span class="sc" style="color:var(--wn);font-size:22px;width:52px">41</span><div style="flex:1">01/11/26 18:40<div class="mut">First scan</div></div><span class="mut">▼</span></div></div></div>
+<div class="dock"><div class="dk on"><i>⌂</i>Home</div><div class="dk"><i>☰</i>Apps</div><div class="dk cta"><i>⌕</i>Scan</div><div class="dk"><i>⋯</i>More</div></div></div>
+<div class="cap"><b>Home.</b> Risk ring instead of tiles, one clear Scan button, top 3 risky apps with one tap to open. Dock: Home, Apps, Scan, More (Monitor, Access, History, Settings). Settings also behind the gear.</div></div>
+
+<!-- SCAN -->
+<div class="col"><div class="ph"><div class="sc">
+<div class="hd"><div class="ib">←</div><b>Scan</b></div>
+<div class="seg"><span class="on">Installed apps</span><span>APK file</span></div>
+<div class="card"><div class="row"><div class="g"><b>Checking apps…</b><div class="mut">Running in the background, you can leave</div></div><b style="color:var(--ok)">38/61</b></div>
+<div class="prog"><i></i></div><div class="mut">Instagram</div></div>
+<div class="row" style="margin-bottom:10px"><div class="btn o g">Scan new apps</div><div class="btn o g">Rescan all</div></div>
+<div class="zone"><big>⬆</big><b>Check an APK before installing</b><div class="mut" style="margin:4px 0 10px">Pick a file, or share it to Sentinel from any app</div><span class="btn s">Pick APK</span> <span class="btn s o" style="border:1px solid var(--ln);background:none;color:var(--tx)">+ Original (optional)</span></div>
+<div class="lbl">Last result</div>
+<div class="item" style="--c:var(--bd)"><span class="pill r">68</span><div class="g"><b>FamApp</b><div class="t">2 serious · 3 warnings</div></div><span class="chev">›</span></div>
+</div><div class="dock"><div class="dk"><i>⌂</i>Home</div><div class="dk"><i>☰</i>Apps</div><div class="dk cta"><i>⌕</i>Scan</div><div class="dk"><i>⋯</i>More</div></div></div>
+<div class="cap"><b>Scan.</b> Two modes in one segmented control, live progress card, a proper drop-style APK picker.</div></div>
+
+<!-- APPS -->
+<div class="col"><div class="ph"><div class="sc">
+<div class="hd"><div class="ib">←</div><b>My apps</b></div>
+<div class="stats"><div class="stat"><b style="color:var(--bd)">2</b><span class="mut">High</span></div><div class="stat"><b style="color:var(--wn)">4</b><span class="mut">Medium</span></div><div class="stat"><b style="color:var(--ok)">3</b><span class="mut">Safe</span></div></div>
+<div class="chips"><span class="chip on">Risky</span><span class="chip">Safe</span><span class="chip">All</span><span class="chip">🔍 Search</span></div>
+<div class="item" style="--c:var(--bd)"><span class="pill r">68</span><div class="g"><b>FamApp <span class="tag r">HIGH</span></b><div class="t">Re-signed certificate differs</div></div><span class="btn s o" style="margin:0">Safe</span></div>
+<div class="item" style="--c:var(--bd)"><span class="pill r">61</span><div class="g"><b>Clone Phone <span class="tag r">HIGH</span></b><div class="t">Overlay + accessibility together</div></div><span class="btn s o" style="margin:0">Safe</span></div>
+<div class="item" style="--c:var(--wn)"><span class="pill a">41</span><div class="g"><b>Termux:API <span class="tag a">MEDIUM</span></b><div class="t">Reads SMS · uses camera</div></div><span class="btn s o" style="margin:0">Safe</span></div>
+<div class="item" style="--c:var(--wn)"><span class="pill a">33</span><div class="g"><b>WhatsApp <span class="tag a">MEDIUM</span></b><div class="t">6 trackers</div></div><span class="btn s o" style="margin:0">Safe</span></div>
+<div class="item" style="--c:var(--ok)"><span class="pill k">12</span><div class="g"><b>PhonePe <span class="tag k">SAFE</span></b><div class="t">Marked safe</div></div><span class="chev">›</span></div>
+</div><div class="dock"><div class="dk"><i>⌂</i>Home</div><div class="dk on"><i>☰</i>Apps</div><div class="dk cta"><i>⌕</i>Scan</div><div class="dk"><i>⋯</i>More</div></div></div>
+<div class="cap"><b>My apps.</b> Stats strip, color bar on each card, one-tap Safe right on the row, search.</div></div>
+
+<!-- DETAIL -->
+<div class="col"><div class="ph"><div class="sc">
+<div class="hd"><div class="ib">←</div><b>App details</b><div class="ib">⋮</div></div>
+<div class="card hero" style="padding-bottom:12px"><div class="ring" style="width:120px;height:120px"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--sv)" stroke-width="12"/><circle cx="60" cy="60" r="46" fill="none" stroke="#FF5C5C" stroke-width="12" stroke-linecap="round" stroke-dasharray="197 289"/></svg><div><b style="color:var(--bd)">68</b><span>High risk</span></div></div>
+<b style="font-size:18px;display:block;margin-top:8px">FamApp</b><div class="mut">com.fam.app · v3.2 · updated 05/11</div>
+<svg viewBox="0 0 200 46" style="width:100%;height:46px;margin-top:10px"><polyline fill="none" stroke="var(--bd)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="6,38 70,34 130,30 194,8"/><circle cx="194" cy="8" r="4" fill="var(--bd)"/></svg>
+<div class="sm" style="color:var(--bd)">▲ Risk up 27 over 3 scans</div></div>
+<div class="row" style="margin-bottom:10px"><div class="btn g">Rescan</div><div class="btn o g">Mark as safe</div><div class="ib">⋯</div></div>
+<div class="card"><div class="row"><div class="g"><b>Network · 24h</b><div class="mut">↑ 48 MB · ↓ 3 MB · bg 41 MB</div></div><span class="tag r">UNUSUAL</span></div><div class="bar"><i style="width:88%;background:var(--bd)"></i></div></div>
+<div class="lbl">Serious · 2</div><div class="card"><div class="f d">Re-signed: certificate differs from original</div><div class="f d">Overlay + accessibility together</div></div>
+<div class="lbl">Scan timeline</div>
+<div class="tl"><div class="e" style="--c:var(--bd)"><b>68</b> <span class="mut">today 14:10 · ▲ 27</span></div><div class="e" style="--c:var(--wn)"><b>41</b> <span class="mut">05/11 · same</span></div></div>
+</div><div class="dock"><div class="dk"><i>⌂</i>Home</div><div class="dk on"><i>☰</i>Apps</div><div class="dk cta"><i>⌕</i>Scan</div><div class="dk"><i>⋯</i>More</div></div></div>
+<div class="cap"><b>App page.</b> Ring + score trend line, big actions, findings grouped by severity, timeline.</div></div>
+
+<!-- HISTORY -->
+<div class="col"><div class="ph"><div class="sc">
+<div class="hd"><div class="ib">←</div><b>History</b><div class="ib">⤴</div></div>
+<div class="chips"><span class="chip on">All</span><span class="chip">High</span><span class="chip">Medium</span><span class="chip">Low</span><span class="chip">Safe</span></div>
+<div class="day">TODAY</div>
+<div class="item" style="--c:var(--bd)"><span class="pill r">68</span><div class="g"><b>FamApp</b><div class="t">14:10 · 2 serious</div></div><span class="chev">›</span></div>
+<div class="item" style="--c:var(--bd)"><span class="pill r">61</span><div class="g"><b>Clone Phone</b><div class="t">14:03 · 3 serious</div></div><span class="chev">›</span></div>
+<div class="day">YESTERDAY</div>
+<div class="item" style="--c:var(--ok)"><span class="pill k">12</span><div class="g"><b>PhonePe</b><div class="t">21:40 · no serious findings</div></div><span class="chev">›</span></div>
+<div class="item" style="--c:var(--wn)"><span class="pill a">33</span><div class="g"><b>WhatsApp</b><div class="t">21:40 · 6 trackers</div></div><span class="chev">›</span></div>
+<div class="mut" style="text-align:center;margin-top:6px">Clear history</div>
+</div><div class="dock"><div class="dk"><i>⌂</i>Home</div><div class="dk"><i>☰</i>Apps</div><div class="dk cta"><i>⌕</i>Scan</div><div class="dk on"><i>⋯</i>More</div></div></div>
+<div class="cap"><b>History.</b> Grouped by day, compact rows, export in the header, Clear moved to the bottom.</div></div>
+
+<!-- MONITOR -->
+<div class="col"><div class="ph"><div class="sc">
+<div class="hd"><div class="ib">←</div><b>Monitor</b><div class="ib">⟳</div></div>
+<div class="card"><div class="row"><div class="g"><div class="mut">Sent in the last 24h</div><b style="font-size:24px">214 MB</b></div><div class="g" style="text-align:right"><div class="mut">Flagged</div><b style="font-size:24px;color:var(--wn)">3</b></div></div></div>
+<div class="chips"><span class="chip on">Flagged</span><span class="chip">All apps</span><span class="chip">Blocked</span></div>
+<div class="card"><div class="row"><div class="g"><b>FamApp</b><div class="mut">↑ 48 MB · ↓ 3 MB</div></div><div class="sw on"></div></div><div class="bar"><i style="width:88%;background:var(--bd)"></i></div><div class="f w" style="margin-bottom:0">41 MB sent while in background</div></div>
+<div class="card"><div class="row"><div class="g"><b>Clone Phone</b><div class="mut">↑ 22 MB · ↓ 2 MB</div></div><div class="sw"></div></div><div class="bar"><i style="width:45%;background:var(--wn)"></i></div></div>
+<div class="btn o">Block all flagged</div>
+</div><div class="dock"><div class="dk"><i>⌂</i>Home</div><div class="dk"><i>☰</i>Apps</div><div class="dk cta"><i>⌕</i>Scan</div><div class="dk on"><i>⋯</i>More</div></div></div>
+<div class="cap"><b>Monitor.</b> Totals on top, usage bars per app, block switch on each card.</div></div>
+
+<!-- ACCESS -->
+<div class="col"><div class="ph"><div class="sc">
+<div class="hd"><div class="ib">←</div><b>Access</b><div class="ib">⟳</div></div>
+<div class="card"><div class="row"><div class="g"><b>Baseline</b><div class="mut">Saved 03/11 · 2 changes since</div></div><span class="tag a">2 NEW</span></div>
+<div class="row" style="margin-top:10px"><div class="btn s g">Check now</div><div class="btn s o g" style="border:1px solid var(--ln);background:none;color:var(--tx)">Save baseline</div></div></div>
+<div class="lbl">Powerful access · 5 apps</div>
+<div class="card"><div class="row"><div class="g"><b>Termux:API</b></div><span class="btn s o">Safe</span></div><span class="perm d">SMS</span><span class="perm">Camera</span><span class="perm">Location</span><span class="perm">Call log</span></div>
+<div class="card"><div class="row"><div class="g"><b>Clone Phone</b></div><span class="btn s o">Safe</span></div><span class="perm d">Accessibility</span><span class="perm d">Draw over apps</span><span class="perm">Contacts</span></div>
+<div class="card"><div class="row"><div class="g"><b>Truecaller</b></div><span class="btn s o">Safe</span></div><span class="perm">Call log</span><span class="perm">Contacts</span></div>
+</div><div class="dock"><div class="dk"><i>⌂</i>Home</div><div class="dk"><i>☰</i>Apps</div><div class="dk cta"><i>⌕</i>Scan</div><div class="dk on"><i>⋯</i>More</div></div></div>
+<div class="cap"><b>Access.</b> Permissions as colored chips instead of a comma list, baseline status up top.</div></div>
+
+<!-- SETTINGS -->
+<div class="col"><div class="ph"><div class="sc">
+<div class="hd"><div class="ib">←</div><b>Settings</b></div>
+<div class="lbl" style="margin-top:2px">Protection</div>
+<div class="set"><div class="row"><div class="g"><b>Background checks</b><div class="mut">New and updated apps, every few hours</div></div><div class="sw on"></div></div>
+<div class="row"><div class="g"><b>Safe apps</b><div class="mut">3 apps marked safe</div></div><span class="mut">Clear ›</span></div>
+<div class="row"><div class="g"><b>Usage access</b><div class="mut">Needed for network monitor</div></div><span class="chev">›</span></div></div>
+<div class="lbl">Cloud checks (optional)</div>
+<div class="set"><div class="row"><div class="g"><b>VirusTotal key</b><div class="mut">Only the file hash is sent</div></div><span class="mut">Not set ›</span></div>
+<div class="row"><div class="g"><b>MalwareBazaar key</b></div><span class="mut">Not set ›</span></div></div>
+<div class="lbl">Data</div>
+<div class="set"><div class="row"><div class="g"><b>Update trackers</b><div class="mut">From Exodus Privacy</div></div><span class="chev">›</span></div>
+<div class="row"><div class="g"><b>About Sentinel</b></div><span class="mut">v12</span></div></div>
+</div><div class="dock"><div class="dk"><i>⌂</i>Home</div><div class="dk"><i>☰</i>Apps</div><div class="dk cta"><i>⌕</i>Scan</div><div class="dk on"><i>⋯</i>More</div></div></div>
+<div class="cap"><b>Settings.</b> Grouped lists like a system settings screen, one row per setting.</div></div>
+
 </div></body></html>
