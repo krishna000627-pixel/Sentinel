@@ -44,6 +44,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.Brush
@@ -80,8 +83,25 @@ private val Dark = darkColorScheme(
     primary = Color(0xFF3DDC97), onPrimary = Color(0xFF06140D), background = Color(0xFF0A0E13),
     surface = Color(0xFF121921), surfaceVariant = Color(0xFF1A232E), error = Color(0xFFFF5C5C)
 )
-private val Red = Color(0xFFFF5C5C); private val Amber = Color(0xFFFFB84D); private val Green = Color(0xFF3DDC97)
-private val Muted = Color(0xFF8696A7)
+private val Light = lightColorScheme(
+    primary = Color(0xFF0E9F6E), onPrimary = Color.White, background = Color(0xFFF4F7FA), onBackground = Color(0xFF0E1621),
+    surface = Color(0xFFFFFFFF), onSurface = Color(0xFF0E1621), surfaceVariant = Color(0xFFE6ECF2), onSurfaceVariant = Color(0xFF3B4A5A),
+    error = Color(0xFFD93A3A), outline = Color(0xFF8696A7)
+)
+
+/** Theme switch read by the colour getters below. 0 = follow system, 1 = light, 2 = dark. */
+private object Pal { var light by mutableStateOf(false) }
+
+private fun applyTheme(c: android.content.Context) {
+    val mode = c.getSharedPreferences("s", 0).getInt("theme", 0)
+    val night = (c.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+    Pal.light = when (mode) { 1 -> true; 2 -> false; else -> !night }
+}
+
+private val Red: Color get() = if (Pal.light) Color(0xFFD93A3A) else Color(0xFFFF5C5C)
+private val Amber: Color get() = if (Pal.light) Color(0xFFB86E00) else Color(0xFFFFB84D)
+private val Green: Color get() = if (Pal.light) Color(0xFF0E9F6E) else Color(0xFF3DDC97)
+private val Muted: Color get() = if (Pal.light) Color(0xFF5B6B7C) else Color(0xFF8696A7)
 private fun sc(s: Int) = if (s >= 55) Red else if (s >= 25) Amber else Green
 private fun lvl(s: Int) = if (s >= 55) "High risk" else if (s >= 25) "Medium risk" else "Low risk"
 private fun fmt(t: Long) = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(t))
@@ -119,8 +139,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
         if (s == null) pick(intent)
+        applyTheme(this)
         setContent {
-            MaterialTheme(colorScheme = Dark, typography = Typography(bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 1.3.em, letterSpacing = 0.sp))) {
+            val light = Pal.light
+            MaterialTheme(colorScheme = if (light) Light else Dark, typography = Typography(bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 1.3.em, letterSpacing = 0.sp))) {
+                val bg = MaterialTheme.colorScheme.background
+                val view = LocalView.current
+                SideEffect {
+                    val w = (view.context as? Activity)?.window ?: return@SideEffect
+                    w.statusBarColor = bg.toArgb(); w.navigationBarColor = bg.toArgb()
+                    val ic = WindowCompat.getInsetsController(w, view)
+                    ic.isAppearanceLightStatusBars = light; ic.isAppearanceLightNavigationBars = light
+                }
                 CompositionLocalProvider(LocalRippleTheme provides NoRipple) {
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { App(incoming) }
                 }
@@ -131,7 +161,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(i: Intent) { super.onNewIntent(i); pick(i) }
 }
 
-private val Line = Color(0xFF222D3A); private val Blue = Color(0xFF6AA9FF); private val Purple = Color(0xFFB794F6)
+private val Line: Color get() = if (Pal.light) Color(0xFFD9E1E8) else Color(0xFF222D3A)
+private val Blue: Color get() = if (Pal.light) Color(0xFF2F7FE0) else Color(0xFF6AA9FF)
+private val Purple: Color get() = if (Pal.light) Color(0xFF7C4DDB) else Color(0xFFB794F6)
 private val DOCK = setOf("home", "apps", "scan", "more")
 
 private fun firstFinding(text: String): String? = text.lines().firstOrNull { it.startsWith("✖") || it.startsWith("!") }?.drop(2)
@@ -159,7 +191,7 @@ private fun dayLabel(t: Long): String {
     Surface(onClick = onClick, shape = RoundedCornerShape(50),
         color = if (on) Green.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant) {
         Text(label, Modifier.padding(horizontal = 14.dp, vertical = 7.dp), fontSize = 13.sp,
-            color = if (on) Green else Color.White, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
+            color = if (on) Green else MaterialTheme.colorScheme.onBackground, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
     }
 
 @Composable private fun Tag(t: String, col: Color) =
@@ -269,7 +301,7 @@ private fun openSettings(c: android.content.Context, vararg intents: Intent) {
             Box(Modifier.weight(1f).clip(RoundedCornerShape(11.dp))
                 .background(if (i == sel) MaterialTheme.colorScheme.background else Color.Transparent)
                 .tap { onSel(i) }.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
-                Text(o, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = if (i == sel) Color.White else Muted)
+                Text(o, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = if (i == sel) MaterialTheme.colorScheme.onBackground else Muted)
             }
         }
     }
@@ -278,10 +310,10 @@ private fun openSettings(c: android.content.Context, vararg intents: Intent) {
 @Composable private fun DockItem(glyph: String, label: String, on: Boolean, cta: Boolean = false, onClick: () -> Unit) {
     Column(Modifier.width(70.dp).clip(RoundedCornerShape(14.dp)).tap(onClick).padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Box(Modifier.clip(RoundedCornerShape(if (cta) 16.dp else 12.dp))
-            .background(if (cta) Green else if (on) Green.copy(alpha = 0.16f) else Color.Transparent)
-            .padding(horizontal = 16.dp, vertical = if (cta) 7.dp else 4.dp)) {
-            Text(glyph, fontSize = 18.sp, color = if (cta) Color(0xFF06140D) else if (on) Green else Muted,
+        Box(Modifier.clip(RoundedCornerShape(12.dp))
+            .background(if (on) Green.copy(alpha = 0.16f) else Color.Transparent)
+            .padding(horizontal = 16.dp, vertical = 4.dp)) {
+            Text(glyph, fontSize = if (cta) 24.sp else 18.sp, color = if (cta || on) Green else Muted,
                 fontWeight = if (cta) FontWeight.ExtraBold else FontWeight.Normal)
         }
         Text(label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = if (cta || on) Green else Muted)
@@ -458,10 +490,14 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                     IconButton({ goBack() }) { Icon(Icons.Default.ArrowBack, "Back") }
                     Text(if (detail != null) "App details" else PAGE_TITLES[page] ?: "", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 } else if (page == "home") {
-                    Spacer(Modifier.width(4.dp))
-                    Image(painterResource(R.drawable.ic_logo), null, Modifier.size(38.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Sentinel", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                    Text("Sentinel", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.width(10.dp))
+                    if (auditRun) Tag("CHECKING", Blue)
+                    else if (high > 0) Tag("$high HIGH", Red)
+                    else if (med > 0) Tag("$med TO REVIEW", Amber)
+                    else Tag("ALL CLEAR", Green)
+                    Spacer(Modifier.weight(1f))
                     IconButton({ go("settings") }) { Icon(Icons.Default.Settings, "Settings", tint = Muted) }
                 } else {
                     Text(PAGE_TITLES[page] ?: "", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(start = 8.dp))
@@ -641,7 +677,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
     Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Panel {
             Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Image(painterResource(R.drawable.ic_logo), null, Modifier.size(72.dp))
+                Image(painterResource(R.drawable.ic_logo), null, Modifier.size(110.dp))
                 Text("Sentinel", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
                 Text("Version $ver", fontSize = 13.sp, color = Muted)
             }
@@ -875,6 +911,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
     var battery by remember { mutableStateOf(true) }
     var lastAudit by remember { mutableStateOf(prefs.getString("last_audit", "") ?: "") }
     var confirm by remember { mutableStateOf(false) }
+    var theme by remember { mutableIntStateOf(prefs.getInt("theme", 0)) }
     fun refresh() {
         usage = Monitor.hasUsage(c)
         battery = try { c.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(c.packageName) } catch (_: Exception) { true }
@@ -895,6 +932,8 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
     val lt = lastAudit.split('|').getOrNull(0)?.toLongOrNull()
     val clearClick: (() -> Unit)? = if (safeCount > 0) ({ confirm = true }) else null
     Column(Modifier.verticalScroll(rememberScrollState()).padding(top = 6.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Label("APPEARANCE")
+        Seg(listOf("System", "Light", "Dark"), theme) { theme = it; prefs.edit().putInt("theme", it).apply(); applyTheme(c) }
         Label("PROTECTION")
         Group {
             SetRow("Background checks", if (!auto) "Off" else when (sched) { null -> "Checking…"; true -> "On: new and updated apps, every few hours"; false -> "Could not be scheduled. Tap the switch to retry." }) {

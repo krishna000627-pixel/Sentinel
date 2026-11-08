@@ -1,7 +1,8 @@
 <resources>
-    <style name="Theme.Sentinel" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#0A0E13</item>
-        <item name="android:statusBarColor">#0A0E13</item>
-        <item name="android:navigationBarColor">#0A0E13</item>
+    <style name="Theme.Sentinel" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F4F7FA</item>
+        <item name="android:statusBarColor">#F4F7FA</item>
+        <item name="android:navigationBarColor">#F4F7FA</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>
