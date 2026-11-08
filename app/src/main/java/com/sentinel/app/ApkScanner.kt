@@ -80,28 +80,149 @@ object ApkScanner {
         File(c.filesDir, "trackers.txt").writeText(sb.toString()); n
     }
 
-    private fun scanStream(s: InputStream, dex: Boolean, tr: List<Pair<String, List<String>>>,
-                           hits: MutableSet<String>, trHit: MutableSet<String>, wallets: MutableSet<String>) {
-        val buf = ByteArray(1 shl 18); var carry = ""
-        while (true) {
-            val n = s.read(buf); if (n < 0) break
-            val t = carry + String(buf, 0, n, Charsets.ISO_8859_1); val l = t.lowercase()
-            MINER.forEach { if (l.contains(it)) hits += it }
-            XMR.find(t)?.let { wallets += "XMR " + it.value.take(10) + "…" }
-            BTC.find(t)?.let { wallets += "BTC " + it.value.take(10) + "…" }
-            if (dex) tr.forEach { (name, sigs) -> if (name !in trHit && sigs.any { l.contains(it) }) trHit += name }
-            carry = t.takeLast(128)
+    /** One-pass multi-pattern search (Aho-Corasick): cost is the file size, however many signatures there are. */
+    private class Matcher(val names: List<String>, private val miners: Int, patterns: List<Pair<Int, String>>) {
+        private val map = IntArray(256)
+        private val k: Int
+        private val next: IntArray
+        private val out: IntArray
+        private val term: IntArray
+        private val link: IntArray
+
+        init {
+            var a = 1
+            for ((_, p) in patterns) for (ch in p) { val i = ch.code and 255; if (map[i] == 0) map[i] = a++ }
+            for (u in 'A'..'Z') map[u.code] = map[u.code + 32]
+            k = a
+            var total = 1
+            for ((_, p) in patterns) total += p.length
+            val nx = IntArray(total * k) { -1 }
+            val o = IntArray(total) { -1 }
+            var n = 1
+            for ((id, p) in patterns) {
+                var s = 0
+                for (ch in p) {
+                    val c = map[ch.code and 255]
+                    var t = nx[s * k + c]
+                    if (t < 0) { t = n++; nx[s * k + c] = t }
+                    s = t
+                }
+                if (o[s] < 0) o[s] = id
+            }
+            val fail = IntArray(n); val lk = IntArray(n) { -1 }; val tm = IntArray(n) { -1 }
+            val q = IntArray(n); var qh = 0; var qt = 0
+            for (c in 0 until k) { val v = nx[c]; if (v < 0) nx[c] = 0 else { fail[v] = 0; q[qt++] = v } }
+            while (qh < qt) {
+                val u = q[qh++]
+                lk[u] = tm[fail[u]]
+                tm[u] = if (o[u] >= 0) u else lk[u]
+                for (c in 0 until k) {
+                    val v = nx[u * k + c]
+                    val f = nx[fail[u] * k + c]
+                    if (v < 0) nx[u * k + c] = f else { fail[v] = f; q[qt++] = v }
+                }
+            }
+            next = nx; out = o; term = tm; link = lk
+        }
+
+        fun feed(s0: Int, b: ByteArray, len: Int, found: BooleanArray, trackers: Boolean): Int {
+            var s = s0
+            for (i in 0 until len) {
+                s = next[s * k + map[b[i].toInt() and 255]]
+                var t = term[s]
+                while (t >= 0) {
+                    val id = out[t]
+                    if (trackers || id < miners) found[id] = true
+                    t = link[t]
+                }
+            }
+            return s
         }
     }
 
+    private var cached: Matcher? = null
+    private var cachedKey = ""
+
+    @Synchronized private fun matcher(c: Context): Matcher {
+        val f = File(c.filesDir, "trackers.txt")
+        val key = if (f.exists()) "${f.length()}:${f.lastModified()}" else "assets"
+        cached?.let { if (cachedKey == key) return it }
+        val tr = trackers(c)
+        val pats = ArrayList<Pair<Int, String>>()
+        MINER.forEachIndexed { i, s -> pats += i to s }
+        tr.forEachIndexed { i, t -> t.second.forEach { pats += (MINER.size + i) to it } }
+        return Matcher(tr.map { it.first }, MINER.size, pats).also { cached = it; cachedKey = key }
+    }
+
+    private fun scanStream(s: InputStream, m: Matcher, found: BooleanArray, trackers: Boolean) {
+        val buf = ByteArray(1 shl 16); var st = 0
+        while (true) {
+            val n = s.read(buf); if (n < 0) break
+            st = m.feed(st, buf, n, found, trackers)
+        }
+    }
+
+    /** Wallet addresses are only looked for when mining strings were already found (rare, so this stays cheap). */
+    private fun findWallets(z: ZipFile): Set<String> {
+        val w = sortedSetOf<String>()
+        val es = z.entries()
+        while (es.hasMoreElements()) {
+            val e = es.nextElement()
+            if (!(DEX.matches(e.name) || e.name.endsWith(".so"))) continue
+            z.getInputStream(e).use { s ->
+                val buf = ByteArray(1 shl 18); var carry = ""
+                while (true) {
+                    val n = s.read(buf); if (n < 0) break
+                    val t = carry + String(buf, 0, n, Charsets.ISO_8859_1)
+                    XMR.find(t)?.let { w += "XMR " + it.value.take(10) + "…" }
+                    BTC.find(t)?.let { w += "BTC " + it.value.take(10) + "…" }
+                    carry = t.takeLast(128)
+                }
+            }
+        }
+        return w
+    }
+
+    private fun hashOf(path: String): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        File(path).inputStream().use { s -> val b = ByteArray(65536); while (true) { val n = s.read(b); if (n < 0) break; md.update(b, 0, n) } }
+        return hex(md.digest())
+    }
+
+    /** Pre-install scan of an APK file (optionally compared with the original), with optional cloud hash checks. */
     suspend fun scan(c: Context, path: String, refPath: String?, vt: String, mb: String): Report = withContext(Dispatchers.IO) {
         val pm = c.packageManager
         val fl = PackageManager.GET_PERMISSIONS or PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS or
             (if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES)
         val pi = pm.getPackageArchiveInfo(path, fl) ?: error("Not a valid APK")
         pi.applicationInfo?.let { it.sourceDir = path; it.publicSourceDir = path }
-        val name = pi.applicationInfo?.loadLabel(pm)?.toString() ?: pi.packageName
         val f = mutableListOf<Finding>()
+        val req = pi.requestedPermissions?.toList() ?: emptyList()
+        val cs = certs(pi)
+        val ref: PackageInfo? = if (refPath != null) pm.getPackageArchiveInfo(refPath, fl)
+            else try { pm.getPackageInfo(pi.packageName, fl) } catch (_: Exception) { null }
+        if (ref == null) f += Finding(0, "No original to compare. Pick the original APK to see signer changes", 0)
+        else {
+            val rc = certs(ref)
+            if (ref.packageName != pi.packageName) f += Finding(1, "Original has a different package name (${ref.packageName})", 5)
+            if (cs.toSet() == rc.toSet()) f += Finding(0, "Signed by the same certificate as the original", 0)
+            else f += Finding(2, "Re-signed: certificate ${cs.firstOrNull()?.take(16)}… differs from original ${rc.firstOrNull()?.take(16)}…", 20)
+            val added = req.toSet() - (ref.requestedPermissions?.toSet() ?: emptySet())
+            if (added.isNotEmpty()) f += Finding(1, "Mod adds ${added.size} permissions: ${added.take(6).joinToString { it.substringAfterLast('.') }}", minOf(added.size * 2, 12))
+        }
+        analyze(c, pi, path, f, vt, mb, false)
+    }
+
+    /** Fast scan of an app that is already installed (used for background audits). No network, no signer comparison. */
+    suspend fun scanInstalled(c: Context, pkg: String): Report = withContext(Dispatchers.IO) {
+        val pi = c.packageManager.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS or PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS)
+        val path = pi.applicationInfo?.sourceDir ?: error("No APK for $pkg")
+        analyze(c, pi, path, mutableListOf(), "", "", true)
+    }
+
+    private fun analyze(c: Context, pi: PackageInfo, path: String, f: MutableList<Finding>, vt: String, mb: String, quick: Boolean): Report {
+        val pm = c.packageManager
+        val name = pi.applicationInfo?.loadLabel(pm)?.toString() ?: pi.packageName
 
         val req = pi.requestedPermissions?.toList() ?: emptyList()
         req.forEach { p ->
@@ -119,54 +240,47 @@ object ApkScanner {
         val exp = svc.count { it.exported && it.permission == null } + rec.count { it.exported && it.permission == null }
         if (exp > 3) f += Finding(1, "$exp exported services/receivers with no permission guard", minOf(exp, 10))
 
-        val cs = certs(pi)
-        val ref: PackageInfo? = if (refPath != null) pm.getPackageArchiveInfo(refPath, fl)
-            else try { pm.getPackageInfo(pi.packageName, fl) } catch (_: Exception) { null }
-        if (ref == null) f += Finding(0, "No original to compare. Pick the original APK to see signer changes", 0)
-        else {
-            val rc = certs(ref)
-            if (ref.packageName != pi.packageName) f += Finding(1, "Original has a different package name (${ref.packageName})", 5)
-            if (cs.toSet() == rc.toSet()) f += Finding(0, "Signed by the same certificate as the original", 0)
-            else f += Finding(2, "Re-signed: certificate ${cs.firstOrNull()?.take(16)}… differs from original ${rc.firstOrNull()?.take(16)}…", 20)
-            val added = req.toSet() - (ref.requestedPermissions?.toSet() ?: emptySet())
-            if (added.isNotEmpty()) f += Finding(1, "Mod adds ${added.size} permissions: ${added.take(6).joinToString { it.substringAfterLast('.') }}", minOf(added.size * 2, 12))
-        }
-
-        val hits = sortedSetOf<String>(); val trHit = sortedSetOf<String>(); val wallets = sortedSetOf<String>()
-        val badSo = mutableListOf<String>(); val tr = trackers(c)
+        val m = matcher(c)
+        val found = BooleanArray(MINER.size + m.names.size)
+        val badSo = mutableListOf<String>()
         ZipFile(path).use { z ->
-            z.entries().asSequence().forEach { e ->
+            val es = z.entries()
+            while (es.hasMoreElements()) {
+                val e = es.nextElement()
                 val dex = DEX.matches(e.name); val so = e.name.endsWith(".so")
                 if (so && SO_BAD.containsMatchIn(e.name.substringAfterLast('/').lowercase())) badSo += e.name
-                if (dex || so) z.getInputStream(e).use { scanStream(it, dex, tr, hits, trHit, wallets) }
+                if (dex || so) z.getInputStream(e).use { scanStream(it, m, found, dex) }
             }
         }
+        val hits = sortedSetOf<String>(); for (i in MINER.indices) if (found[i]) hits += MINER[i]
+        val trHit = sortedSetOf<String>(); for (i in m.names.indices) if (found[MINER.size + i]) trHit += m.names[i]
+        val wallets: Set<String> = if (hits.isNotEmpty()) ZipFile(path).use { findWallets(it) } else emptySet()
         if (hits.isNotEmpty()) f += Finding(2, "Crypto-miner strings in code: ${hits.joinToString()}", minOf(hits.size * 12, 40))
         if (wallets.isNotEmpty()) f += Finding(2, "Crypto wallet address inside code: ${wallets.joinToString()}", 15)
         if (badSo.isNotEmpty()) f += Finding(2, "Suspicious native libraries: ${badSo.take(4).joinToString()}", 15)
         if (trHit.isNotEmpty()) f += Finding(1, "${trHit.size} trackers/ad SDKs: ${trHit.take(8).joinToString()}", minOf(trHit.size * 2, 16))
         else f += Finding(0, "No known trackers found", 0)
 
-        val md = MessageDigest.getInstance("SHA-256")
-        File(path).inputStream().use { s -> val b = ByteArray(65536); while (true) { val n = s.read(b); if (n < 0) break; md.update(b, 0, n) } }
-        val h = hex(md.digest())
-        if (vt.isNotBlank()) try {
-            val (code, body) = http("https://www.virustotal.com/api/v3/files/$h", headers = mapOf("x-apikey" to vt))
-            if (code == 200) {
-                val m = JSONObject(body).getJSONObject("data").getJSONObject("attributes").getJSONObject("last_analysis_stats").getInt("malicious")
-                f += if (m > 0) Finding(2, "VirusTotal: $m engines flag this file", minOf(m * 5, 40)) else Finding(0, "VirusTotal knows this file: 0 detections", 0)
-            } else if (code == 404) f += Finding(0, "VirusTotal has never seen this exact file (normal for a fresh mod)", 0)
-            else f += Finding(0, "VirusTotal lookup failed ($code)", 0)
-        } catch (_: Exception) { f += Finding(0, "VirusTotal lookup failed: offline?", 0) }
-        if (mb.isNotBlank()) try {
-            val body = http("https://mb-api.abuse.ch/api/v1/", "POST", mapOf("Auth-Key" to mb, "Content-Type" to "application/x-www-form-urlencoded"), "query=get_info&hash=$h").second
-            f += when (val st = JSONObject(body).optString("query_status")) {
-                "ok" -> Finding(2, "MalwareBazaar: this exact file is a known malware sample", 50)
-                "hash_not_found" -> Finding(0, "MalwareBazaar: hash not in database", 0)
-                else -> Finding(0, "MalwareBazaar: $st", 0)
-            }
-        } catch (_: Exception) { f += Finding(0, "MalwareBazaar lookup failed: offline?", 0) }
-        f += Finding(0, "SHA-256 ${h.take(16)}…", 0)
-        Report(name, pi.packageName, minOf(100, f.sumOf { it.w }), f.sortedByDescending { it.sev * 100 + it.w })
+        if (!quick) {
+            val h = hashOf(path)
+            if (vt.isNotBlank()) try {
+                val (code, body) = http("https://www.virustotal.com/api/v3/files/$h", headers = mapOf("x-apikey" to vt))
+                if (code == 200) {
+                    val n = JSONObject(body).getJSONObject("data").getJSONObject("attributes").getJSONObject("last_analysis_stats").getInt("malicious")
+                    f += if (n > 0) Finding(2, "VirusTotal: $n engines flag this file", minOf(n * 5, 40)) else Finding(0, "VirusTotal knows this file: 0 detections", 0)
+                } else if (code == 404) f += Finding(0, "VirusTotal has never seen this exact file (normal for a fresh mod)", 0)
+                else f += Finding(0, "VirusTotal lookup failed ($code)", 0)
+            } catch (_: Exception) { f += Finding(0, "VirusTotal lookup failed: offline?", 0) }
+            if (mb.isNotBlank()) try {
+                val body = http("https://mb-api.abuse.ch/api/v1/", "POST", mapOf("Auth-Key" to mb, "Content-Type" to "application/x-www-form-urlencoded"), "query=get_info&hash=$h").second
+                f += when (val st = JSONObject(body).optString("query_status")) {
+                    "ok" -> Finding(2, "MalwareBazaar: this exact file is a known malware sample", 50)
+                    "hash_not_found" -> Finding(0, "MalwareBazaar: hash not in database", 0)
+                    else -> Finding(0, "MalwareBazaar: $st", 0)
+                }
+            } catch (_: Exception) { f += Finding(0, "MalwareBazaar lookup failed: offline?", 0) }
+            f += Finding(0, "SHA-256 ${h.take(16)}…", 0)
+        }
+        return Report(name, pi.packageName, minOf(100, f.sumOf { it.w }), f.sortedByDescending { it.sev * 100 + it.w })
     }
 }

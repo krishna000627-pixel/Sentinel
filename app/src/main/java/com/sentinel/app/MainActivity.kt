@@ -1,10 +1,13 @@
 package com.sentinel.app
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -30,7 +33,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -81,7 +88,11 @@ class MainActivity : ComponentActivity() {
     var err by remember { mutableStateOf<String?>(null) }
     var apk by remember { mutableStateOf<String?>(null) }
     var ref by remember { mutableStateOf<String?>(null) }
-    var audit by remember { mutableStateOf("") }
+    var auditRun by remember { mutableStateOf(false) }
+    var auditDone by remember { mutableIntStateOf(0) }
+    var auditTotal by remember { mutableIntStateOf(0) }
+    var auditLabel by remember { mutableStateOf("") }
+    var lastAudit by remember { mutableStateOf(prefs.getString("last_audit", "") ?: "") }
     var byRisk by remember { mutableStateOf(false) }
     val blocked by remember { dao.blocks() }.collectAsState(emptyList())
     val scans by remember { dao.scans() }.collectAsState(emptyList())
@@ -125,22 +136,29 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) { err = "Could not open that file" }
         }
     }
-    fun auditAll() {
-        scope.launch {
-            busy = true; err = null
-            val pm = c.packageManager
-            val list = withContext(Dispatchers.IO) {
-                pm.getInstalledApplications(0).filter { (it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 && it.packageName != c.packageName }
-            }
-            var n = 0
-            for (a in list) {
-                n++; audit = "Auditing $n/${list.size}: ${a.loadLabel(pm)}"
-                try {
-                    val r = ApkScanner.scan(c, a.sourceDir, null, "", "")
-                    dao.add(ScanEntity(name = r.name, pkg = r.pkg, score = r.score, text = r.text(), time = System.currentTimeMillis()))
-                } catch (_: Exception) {}
-            }
-            audit = ""; busy = false; byRisk = true; tab = 2
+    val wm = remember { WorkManager.getInstance(c) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val infos = try { withContext(Dispatchers.IO) { wm.getWorkInfosForUniqueWork("audit").get() } } catch (_: Exception) { emptyList() }
+            val cur = infos.firstOrNull { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+            auditRun = cur != null
+            auditDone = cur?.progress?.getInt("done", 0) ?: 0
+            auditTotal = cur?.progress?.getInt("total", 0) ?: 0
+            auditLabel = cur?.progress?.getString("label") ?: ""
+            lastAudit = prefs.getString("last_audit", "") ?: ""
+            delay(1000)
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (prefs.getBoolean("auto", true)) Background.auto(c, true)
+        if (prefs.getString("last_audit", "").isNullOrEmpty()) Background.scanNow(c)
+    }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("asked_notif", false) &&
+            ContextCompat.checkSelfPermission(c, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            prefs.edit().putBoolean("asked_notif", true).apply()
+            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -173,10 +191,28 @@ class MainActivity : ComponentActivity() {
                                 OutlinedButton({ pickRef.launch(arrayOf("*/*")) }, Modifier.weight(1f)) { Text(if (ref == null) "Original (optional)" else "Original ✓", maxLines = 1) }
                             }
                             Button({ run(apk!!, ref) }, Modifier.fillMaxWidth(), enabled = apk != null && !busy) { Text(if (busy) "Scanning…" else "Scan") }
-                            OutlinedButton({ auditAll() }, Modifier.fillMaxWidth(), enabled = !busy) { Text("Audit all installed apps") }
                             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                            if (audit.isNotEmpty()) Text(audit, fontSize = 12.sp, maxLines = 1)
                             err?.let { Text(it, color = Red, fontSize = 13.sp) }
+                        }
+                    }
+                    item {
+                        Panel {
+                            Text("Installed apps", fontWeight = FontWeight.Bold)
+                            Text("Runs in the background, so you can leave the app.", fontSize = 12.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton({ auditRun = true; Background.scanNow(c) }, Modifier.weight(1f), enabled = !auditRun) { Text("Scan new apps", maxLines = 1) }
+                                OutlinedButton({ auditRun = true; Background.scanNow(c, true) }, Modifier.weight(1f), enabled = !auditRun) { Text("Rescan all", maxLines = 1) }
+                            }
+                            if (auditRun) {
+                                if (auditTotal > 0) LinearProgressIndicator(progress = auditDone / auditTotal.toFloat(), modifier = Modifier.fillMaxWidth())
+                                else LinearProgressIndicator(Modifier.fillMaxWidth())
+                                Text(if (auditTotal > 0) "Scanning $auditDone/$auditTotal  $auditLabel" else "Starting…", fontSize = 12.sp, maxLines = 1)
+                            } else {
+                                val la = lastAudit.split('|')
+                                val t = la.getOrNull(0)?.toLongOrNull()
+                                if (la.size == 3 && t != null)
+                                    Text("Last check ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(t))}: ${la[1]} apps scanned, ${la[2]} risky", fontSize = 12.sp)
+                            }
                         }
                     }
                     report?.let { r ->
@@ -300,6 +336,16 @@ class MainActivity : ComponentActivity() {
             OutlinedTextField(mbk, { mbk = it; prefs.edit().putString("mb", it.trim()).apply() }, Modifier.fillMaxWidth(), label = { Text("abuse.ch Auth-Key (MalwareBazaar)") }, singleLine = true)
         }
         Panel {
+            var auto by remember { mutableStateOf(prefs.getBoolean("auto", true)) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Check apps in the background", fontWeight = FontWeight.Bold)
+                    Text("Scans new and updated apps every few hours and alerts you about risky ones.", fontSize = 12.sp)
+                }
+                Switch(checked = auto, onCheckedChange = { auto = it; prefs.edit().putBoolean("auto", it).apply(); Background.auto(c, it) })
+            }
+        }
+        Panel {
             Text("Trackers", fontWeight = FontWeight.Bold)
             Button({ scope.launch { msg = try { "Updated: ${ApkScanner.refreshTrackers(c)} trackers" } catch (e: Exception) { "Update failed: are you offline?" } } }) { Text("Update from Exodus Privacy") }
             if (msg.isNotEmpty()) Text(msg, fontSize = 12.sp)
@@ -312,39 +358,51 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable fun AccessTab(prefs: SharedPreferences) {
-    val c = LocalContext.current
-    var items by remember { mutableStateOf(Access.privileged(c)) }
-    var res by remember { mutableStateOf<List<Pair<Int, String>>?>(null) }
+    val c = LocalContext.current; val scope = rememberCoroutineScope()
+    var list by remember { mutableStateOf<List<Pair<String, Pair<String, Set<String>>>>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var res by remember { mutableStateOf<List<String>?>(null) }
     var msg by remember { mutableStateOf("") }
+    fun reload() {
+        scope.launch {
+            loading = true
+            list = withContext(Dispatchers.Default) { Access.privileged(c) }
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { reload() }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
         item {
             Panel {
                 Text("Changes since baseline", fontWeight = FontWeight.Bold)
-                Text("Save a baseline while your phone is clean. Later, check for updates signed by a different key, new permissions and new apps.", fontSize = 12.sp)
+                Text("Save a baseline while your phone is clean. Later, check for new apps and new powerful access.", fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton({ msg = "Baseline saved for ${Access.saveBaseline(c, prefs)} apps"; res = null }, Modifier.weight(1f)) { Text("Save baseline") }
+                    OutlinedButton({ msg = "Baseline saved for ${Access.saveBaseline(prefs, list)} apps"; res = null }, Modifier.weight(1f), enabled = !loading) { Text("Save baseline") }
                     Button({
-                        val r = Access.checkBaseline(c, prefs)
-                        if (r == null) msg = "Save a baseline first" else { res = r; msg = if (r.isEmpty()) "No changes" else "${r.size} changes" }
-                    }, Modifier.weight(1f)) { Text("Check now") }
+                        val r = Access.checkBaseline(prefs, list)
+                        if (r.firstOrNull()?.startsWith("No baseline") == true) { msg = "Save a baseline first"; res = null }
+                        else { res = r; msg = if (r.isEmpty()) "No changes" else "${r.size} changes" }
+                    }, Modifier.weight(1f), enabled = !loading) { Text("Check now") }
                 }
                 if (msg.isNotEmpty()) Text(msg, fontSize = 13.sp)
-                res?.forEach { (s, t) -> Text("● $t", color = if (s == 2) Red else Amber, fontSize = 13.sp) }
+                res?.forEach { t -> Text("● $t", color = Amber, fontSize = 13.sp) }
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Powerful access that is ON", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                TextButton({ items = Access.privileged(c) }) { Text("Refresh") }
+                Text("Apps with powerful access", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                TextButton({ reload() }) { Text("Refresh") }
             }
         }
-        items(items) { p ->
+        if (loading) item { Text("Loading…", fontSize = 12.sp) }
+        else if (list.isEmpty()) item { Text("No third-party app has powerful access", fontSize = 12.sp, color = Green) }
+        items(list, key = { it.first }) { p ->
             Panel {
-                Text(p.title, fontWeight = FontWeight.Bold)
-                Text(p.note, fontSize = 12.sp)
-                if (p.apps.isEmpty()) Text("No third-party apps", fontSize = 12.sp, color = Green)
-                else Text(p.apps.joinToString(", "), color = Amber, fontSize = 13.sp)
-                TextButton({ try { c.startActivity(Intent(p.action)) } catch (_: Exception) {} }) { Text("Review") }
+                Text(p.second.first, fontWeight = FontWeight.Bold)
+                Text(p.second.second.joinToString(", "), color = Amber, fontSize = 13.sp)
+                TextButton({
+                    try { c.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${p.first}"))) } catch (_: Exception) {}
+                }) { Text("Review") }
             }
         }
     }
