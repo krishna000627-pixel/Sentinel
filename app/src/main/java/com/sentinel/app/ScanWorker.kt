@@ -85,6 +85,12 @@ object Background {
         WorkManager.getInstance(c).enqueueUniqueWork(NOW, ExistingWorkPolicy.KEEP, req)
     }
 
+    /** True when the repeating background check is really queued with the system. */
+    fun scheduled(c: Context): Boolean = try {
+        WorkManager.getInstance(c).getWorkInfosForUniqueWork(AUTO).get()
+            .any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
+    } catch (_: Exception) { false }
+
     fun auto(c: Context, on: Boolean) {
         val wm = WorkManager.getInstance(c)
         if (!on) { wm.cancelUniqueWork(AUTO); return }

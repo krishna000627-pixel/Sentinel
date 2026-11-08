@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.FlowPreview::class)
+
 package com.sentinel.app
 
 import android.Manifest
@@ -42,6 +44,17 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.composed
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material.ripple.LocalRippleTheme
+import androidx.compose.material.ripple.RippleAlpha
+import androidx.compose.material.ripple.RippleTheme
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -53,6 +66,10 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -74,6 +91,19 @@ private fun Report.entity() = ScanEntity(name = name, pkg = pkg, score = score, 
 private fun installedPkgs(c: android.content.Context): Set<String> =
     try { c.packageManager.getInstalledPackages(0).map { it.packageName }.toSet() } catch (_: Exception) { emptySet() }
 
+@Suppress("DEPRECATION")
+private object NoRipple : RippleTheme {
+    @Composable override fun defaultColor() = Color.Transparent
+    @Composable override fun rippleAlpha() = RippleAlpha(0f, 0f, 0f, 0f)
+}
+
+/** Tap without the grey ripple: the element just dims a little while pressed. */
+private fun Modifier.tap(onClick: () -> Unit): Modifier = composed {
+    val src = remember { MutableInteractionSource() }
+    val down by src.collectIsPressedAsState()
+    this.graphicsLayer { alpha = if (down) 0.7f else 1f }.clickable(interactionSource = src, indication = null, onClick = onClick)
+}
+
 class MainActivity : ComponentActivity() {
     private val incoming = mutableStateOf<Uri?>(null)
 
@@ -89,7 +119,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
         if (s == null) pick(intent)
-        setContent { MaterialTheme(colorScheme = Dark) { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { App(incoming) } } }
+        setContent {
+            MaterialTheme(colorScheme = Dark, typography = Typography(bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 1.3.em, letterSpacing = 0.sp))) {
+                CompositionLocalProvider(LocalRippleTheme provides NoRipple) {
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { App(incoming) }
+                }
+            }
+        }
     }
 
     override fun onNewIntent(i: Intent) { super.onNewIntent(i); pick(i) }
@@ -134,7 +170,7 @@ private fun dayLabel(t: Long): String {
     text.lines().filter { it.isNotBlank() }.forEach { l ->
         val sev = if (l.startsWith("✖")) 2 else if (l.startsWith("!")) 1 else 0
         Row(verticalAlignment = Alignment.Top) {
-            Text("●", color = if (sev == 2) Red else if (sev == 1) Amber else Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
+            Text("●", color = if (sev == 2) Red else if (sev == 1) Amber else Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.width(8.dp))
             Text(l.drop(2), fontSize = 13.sp)
         }
@@ -147,7 +183,7 @@ private fun dayLabel(t: Long): String {
     }
 
 @Composable private fun MiniBtn(t: String, onClick: () -> Unit) =
-    OutlinedButton(onClick, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(32.dp), shape = RoundedCornerShape(12.dp)) {
+    OutlinedButton(onClick, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(36.dp), shape = RoundedCornerShape(12.dp)) {
         Text(t, fontSize = 12.sp, maxLines = 1)
     }
 
@@ -156,13 +192,30 @@ private fun dayLabel(t: Long): String {
         Text("$score", color = col, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
     }
 
-@Composable private fun Item(col: Color, onClick: (() -> Unit)? = null, content: @Composable RowScope.() -> Unit) {
-    val m = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface)
-    Box(if (onClick != null) m.clickable(onClick = onClick) else m) {
-        Box(Modifier.align(Alignment.CenterStart).width(3.dp).height(28.dp).clip(RoundedCornerShape(3.dp)).background(col))
+@Composable private fun Item(col: Color, onClick: (() -> Unit)? = null, animate: Boolean = false, content: @Composable RowScope.() -> Unit) {
+    val base = if (onClick != null) Modifier.tap(onClick) else Modifier
+    val shape = RoundedCornerShape(16.dp)
+    val box = base.fillMaxWidth().clip(shape).background(MaterialTheme.colorScheme.surface)
+    Box(if (animate) box.animateContentSize() else box) {
+        Box(Modifier.align(Alignment.TopStart).padding(top = 13.dp).width(3.dp).height(38.dp).clip(RoundedCornerShape(3.dp)).background(col))
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
+}
+
+@Composable private fun OnResume(action: () -> Unit) {
+    val owner = LocalLifecycleOwner.current
+    val cur by rememberUpdatedState(action)
+    DisposableEffect(owner) {
+        val ob = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) cur() }
+        owner.lifecycle.addObserver(ob)
+        onDispose { owner.lifecycle.removeObserver(ob) }
+    }
+}
+
+private fun openSettings(c: android.content.Context, vararg intents: Intent) {
+    for (i in intents) { try { c.startActivity(i); return } catch (_: Exception) {} }
+    android.widget.Toast.makeText(c, "Could not open that settings page on this phone", android.widget.Toast.LENGTH_SHORT).show()
 }
 
 @Composable private fun Bar(frac: Float, col: Color) =
@@ -215,7 +268,7 @@ private fun dayLabel(t: Long): String {
         opts.forEachIndexed { i, o ->
             Box(Modifier.weight(1f).clip(RoundedCornerShape(11.dp))
                 .background(if (i == sel) MaterialTheme.colorScheme.background else Color.Transparent)
-                .clickable { onSel(i) }.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
+                .tap { onSel(i) }.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
                 Text(o, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = if (i == sel) Color.White else Muted)
             }
         }
@@ -223,7 +276,7 @@ private fun dayLabel(t: Long): String {
 }
 
 @Composable private fun DockItem(glyph: String, label: String, on: Boolean, cta: Boolean = false, onClick: () -> Unit) {
-    Column(Modifier.width(70.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
+    Column(Modifier.width(70.dp).clip(RoundedCornerShape(14.dp)).tap(onClick).padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Box(Modifier.clip(RoundedCornerShape(if (cta) 16.dp else 12.dp))
             .background(if (cta) Green else if (on) Green.copy(alpha = 0.16f) else Color.Transparent)
@@ -252,7 +305,7 @@ private fun dayLabel(t: Long): String {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surface), content = content)
 
 @Composable private fun SetRow(title: String, sub: String? = null, last: Boolean = false, onClick: (() -> Unit)? = null, trailing: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 14.dp, vertical = 12.dp),
+    Row(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.tap(onClick) else Modifier).padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
@@ -288,11 +341,20 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
     var lastAudit by remember { mutableStateOf(prefs.getString("last_audit", "") ?: "") }
     var rescanning by remember { mutableStateOf<String?>(null) }
     var detail by rememberSaveable { mutableStateOf<String?>(null) }
-    val blocked by remember { dao.blocks() }.collectAsState(emptyList())
-    val scans by remember { dao.scans() }.collectAsState(emptyList())
-    val safeList by remember { dao.safes() }.collectAsState(emptyList())
-    val safe = remember(safeList) { safeList.toSet() }
-    val inst = remember(lastAudit, auditRun) { installedPkgs(c) }
+    val blockedRaw by remember { dao.blocks() }.collectAsState(null)
+    val blocked = blockedRaw ?: emptyList()
+    val scans by remember { dao.scans().debounce(250) }.collectAsState(remember { Cache.loadLatest(c) })
+    val safeRaw by remember { dao.safes() }.collectAsState(null)
+    val safe = remember(safeRaw) { safeRaw?.toSet() ?: Cache.loadSafe(c) }
+    var inst by remember { mutableStateOf(Cache.loadInst(c)) }
+    LaunchedEffect(lastAudit, auditRun) {
+        val now = withContext(Dispatchers.IO) { installedPkgs(c) }
+        if (now.isNotEmpty() && now != inst) { inst = now; withContext(Dispatchers.IO) { Cache.saveInst(c, now) } }
+    }
+    LaunchedEffect(scans) {
+        if (scans.any { it.id > 0 }) { delay(1500); withContext(Dispatchers.IO) { Cache.saveLatest(c, scans.distinctBy { it.pkg }) } }
+    }
+    LaunchedEffect(safeRaw) { safeRaw?.let { l -> withContext(Dispatchers.IO) { Cache.saveSafe(c, l.toSet()) } } }
     val latest = remember(scans, inst) { scans.distinctBy { it.pkg }.filter { it.pkg in inst } }
     val high = latest.count { it.score >= 55 && it.pkg !in safe }
     val med = latest.count { it.score in 25..54 && it.pkg !in safe }
@@ -334,9 +396,10 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
     val vpnLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode == Activity.RESULT_OK) Monitor.applyVpn(c, blocked)
     }
-    LaunchedEffect(blocked) {
+    LaunchedEffect(blockedRaw) {
+        val b = blockedRaw ?: return@LaunchedEffect
         val i = VpnService.prepare(c)
-        if (blocked.isNotEmpty() && i != null) vpnLauncher.launch(i) else Monitor.applyVpn(c, blocked)
+        if (b.isNotEmpty() && i != null) vpnLauncher.launch(i) else Monitor.applyVpn(c, b)
     }
 
     LaunchedEffect(incoming.value) {
@@ -407,7 +470,8 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
         },
         bottomBar = { if (showDock) Dock(page) { go(it) } }
     ) { pad ->
-        Box(Modifier.padding(pad).padding(horizontal = 12.dp)) {
+        Box(Modifier.padding(pad)) {
+          Box(Modifier.padding(horizontal = 12.dp)) {
             val d = detail
             if (d != null) AppDetail(
                 pkg = d, scans = scans.filter { it.pkg == d }, installed = d in inst, safe = d in safe, rescanning = rescanning, blocked = d in blocked,
@@ -463,7 +527,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                         Text("Nothing needs your attention.", fontSize = 13.sp, color = Green, modifier = Modifier.padding(start = 4.dp))
                     }
                 }
-                "scan" -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
+                "scan" -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {
                     item { Seg(listOf("Installed apps", "APK file"), scanTab) { scanTab = it } }
                     if (scanTab == 0) {
                         item {
@@ -547,6 +611,9 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                 "about" -> AboutPage(ver)
                 else -> SettingsTab(prefs, safe.size, ver, { go("about") }) { scope.launch { dao.clearSafe() } }
             }
+          }
+          Box(Modifier.fillMaxWidth().height(10.dp).align(Alignment.TopCenter)
+              .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background, Color.Transparent))))
         }
     }
 }
@@ -607,7 +674,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
     }
     val hi = latest.count { it.score >= 55 && it.pkg !in safe }
     val md = latest.count { it.score in 25..54 && it.pkg !in safe }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(Triple("High", hi, Red), Triple("Medium", md, Amber), Triple("Safe", latest.count { it.pkg in safe }, Green)).forEach { (l, n, col) ->
@@ -678,7 +745,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
         title = { Text("Clear history?") }, text = { Text("This removes every saved scan result. Your safe-app marks are kept.") },
         confirmButton = { TextButton({ scope.launch { dao.clear() }; confirm = false }) { Text("Clear") } },
         dismissButton = { TextButton({ confirm = false }) { Text("Cancel") } })
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {
         item {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("All", "High", "Medium", "Low", "Safe").forEachIndexed { i, l -> Chip(l, flt == i) { flt = i } }
@@ -719,18 +786,25 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
 
 @Composable fun MonitorTab(blocked: List<String>, safe: Set<String>, onSafe: (String, Boolean) -> Unit, onBlock: (String, Boolean) -> Unit, onOpen: (String) -> Unit, onScan: (String) -> Unit) {
     val c = LocalContext.current; val scope = rememberCoroutineScope()
-    var apps by remember { mutableStateOf<List<AppNet>>(emptyList()) }
+    var apps by remember { mutableStateOf(Cache.net(c) ?: emptyList()) }
+    var stamp by remember { mutableLongStateOf(Cache.netAt()) }
+    var refreshing by remember { mutableStateOf(false) }
     var ok by remember { mutableStateOf(Monitor.hasUsage(c)) }
     fun reload() {
         ok = Monitor.hasUsage(c)
-        if (ok) scope.launch { apps = withContext(Dispatchers.Default) { Monitor.load(c) } }
+        if (ok && !refreshing) scope.launch {
+            refreshing = true
+            val l = try { withContext(Dispatchers.Default) { Monitor.load(c) } } catch (_: Exception) { null }
+            if (l != null) { withContext(Dispatchers.IO) { Cache.putNet(c, l) }; apps = l; stamp = System.currentTimeMillis() }
+            refreshing = false
+        }
     }
     var sel by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { reload() }
+    LaunchedEffect(Unit) { ok = Monitor.hasUsage(c); if (ok && (apps.isEmpty() || Cache.netStale())) reload() }
     val flagged = apps.filter { it.flags.isNotEmpty() && it.pkg !in safe }
     val maxTx = (apps.maxOfOrNull { it.tx } ?: 1L).coerceAtLeast(1L).toFloat()
     val list = when (sel) { 0 -> flagged; 1 -> apps; else -> apps.filter { it.pkg in blocked } }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {
         if (!ok) item {
             Panel {
                 Text("Allow usage access so Sentinel can read per-app network totals.", fontSize = 13.sp)
@@ -741,7 +815,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
             Panel {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Sent in the last 24h", fontSize = 12.sp, color = Muted)
+                        Text("Sent in the last 24h" + (if (stamp > 0) " · updated ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(stamp))}" else ""), fontSize = 12.sp, color = Muted)
                         Text(mb(apps.sumOf { it.tx }), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
                     }
                     Column(horizontalAlignment = Alignment.End) {
@@ -758,7 +832,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                     Chip("All apps", sel == 1) { sel = 1 }
                     Chip("Blocked", sel == 2) { sel = 2 }
                 }
-                TextButton({ reload() }) { Text("Refresh") }
+                TextButton({ reload() }, enabled = !refreshing) { Text(if (refreshing) "Refreshing…" else "Refresh") }
             }
         }
         if (flagged.isNotEmpty()) item {
@@ -770,7 +844,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
             val col = if (a.flags.isEmpty() || isSafe) Blue else sc(a.score)
             Panel {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).clickable { onOpen(a.pkg) }) {
+                    Column(Modifier.weight(1f).tap { onOpen(a.pkg) }) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(a.label, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
                             if (isSafe) Tag("SAFE", Green)
@@ -790,31 +864,74 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
 
 @Composable fun SettingsTab(prefs: SharedPreferences, safeCount: Int, ver: String, onAbout: () -> Unit, onClearSafe: () -> Unit) {
     val c = LocalContext.current; val scope = rememberCoroutineScope()
-    var vt by remember { mutableStateOf(prefs.getString("vt", "")!!) }
-    var mbk by remember { mutableStateOf(prefs.getString("mb", "")!!) }
+    var vt by remember { mutableStateOf(prefs.getString("vt", "") ?: "") }
+    var mbk by remember { mutableStateOf(prefs.getString("mb", "") ?: "") }
     var msg by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var updating by remember { mutableStateOf(false) }
     var auto by remember { mutableStateOf(prefs.getBoolean("auto", true)) }
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var sched by remember { mutableStateOf<Boolean?>(null) }
+    var usage by remember { mutableStateOf(Monitor.hasUsage(c)) }
+    var battery by remember { mutableStateOf(true) }
+    var lastAudit by remember { mutableStateOf(prefs.getString("last_audit", "") ?: "") }
+    var confirm by remember { mutableStateOf(false) }
+    fun refresh() {
+        usage = Monitor.hasUsage(c)
+        battery = try { c.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(c.packageName) } catch (_: Exception) { true }
+        lastAudit = prefs.getString("last_audit", "") ?: ""
+        scope.launch {
+            if (auto) {
+                var ok = withContext(Dispatchers.IO) { Background.scheduled(c) }
+                if (!ok) { Background.auto(c, true); delay(300); ok = withContext(Dispatchers.IO) { Background.scheduled(c) } }
+                sched = ok
+            } else sched = false
+        }
+    }
+    OnResume { refresh() }
+    if (confirm) AlertDialog(onDismissRequest = { confirm = false },
+        title = { Text("Clear safe list?") }, text = { Text("Apps you marked as safe will be checked and alerted about again.") },
+        confirmButton = { TextButton({ onClearSafe(); confirm = false }) { Text("Clear") } },
+        dismissButton = { TextButton({ confirm = false }) { Text("Cancel") } })
+    val lt = lastAudit.split('|').getOrNull(0)?.toLongOrNull()
+    val clearClick: (() -> Unit)? = if (safeCount > 0) ({ confirm = true }) else null
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(top = 6.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Label("PROTECTION")
         Group {
-            SetRow("Background checks", "New and updated apps, every few hours") {
-                Switch(checked = auto, onCheckedChange = { auto = it; prefs.edit().putBoolean("auto", it).apply(); Background.auto(c, it) })
+            SetRow("Background checks", if (!auto) "Off" else when (sched) { null -> "Checking…"; true -> "On: new and updated apps, every few hours"; false -> "Could not be scheduled. Tap the switch to retry." }) {
+                Switch(checked = auto, onCheckedChange = {
+                    auto = it; prefs.edit().putBoolean("auto", it).apply(); Background.auto(c, it)
+                    sched = null; refresh()
+                })
             }
-            SetRow("Safe apps", if (safeCount == 0) "No apps marked as safe" else "$safeCount app${if (safeCount == 1) "" else "s"} marked as safe", onClick = if (safeCount > 0) onClearSafe else null) {
+            SetRow("Check now", if (lt != null) "Last check ${fmt(lt)}" else "Not checked yet", onClick = {
+                Background.scanNow(c); note = "Check started. You can leave the app."
+            }) { Chev() }
+            SetRow("Battery", if (battery) "Unrestricted: checks can run in the background" else "Restricted: the phone may stop background checks", onClick = {
+                openSettings(c, Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${c.packageName}")))
+            }) { Text(if (battery) "OK" else "Fix ›", color = if (battery) Green else Amber, fontSize = 13.sp) }
+            SetRow("Usage access", if (usage) "Allowed" else "Needed for the network monitor", onClick = {
+                openSettings(c, Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            }) { Text(if (usage) "OK" else "Allow ›", color = if (usage) Green else Amber, fontSize = 13.sp) }
+            SetRow("Safe apps", if (safeCount == 0) "No apps marked as safe" else "$safeCount app${if (safeCount == 1) "" else "s"} marked as safe", last = true, onClick = clearClick) {
                 if (safeCount > 0) Text("Clear ›", color = Muted, fontSize = 13.sp)
             }
-            SetRow("Usage access", "Needed for the network monitor", last = true, onClick = { c.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Chev() }
         }
+        if (note.isNotEmpty()) Text(note, fontSize = 12.sp, color = Green, modifier = Modifier.padding(start = 4.dp))
         Label("CLOUD CHECKS (OPTIONAL)")
         Panel {
-            Text("Only the SHA-256 hash is sent, never the file.", fontSize = 12.sp, color = Muted)
+            Text("Only the SHA-256 hash is sent, never the file. Saved as you type.", fontSize = 12.sp, color = Muted)
             OutlinedTextField(vt, { vt = it; prefs.edit().putString("vt", it.trim()).apply() }, Modifier.fillMaxWidth(), label = { Text("VirusTotal API key") }, singleLine = true)
             OutlinedTextField(mbk, { mbk = it; prefs.edit().putString("mb", it.trim()).apply() }, Modifier.fillMaxWidth(), label = { Text("abuse.ch Auth-Key (MalwareBazaar)") }, singleLine = true)
         }
         Label("DATA")
         Group {
-            SetRow("Update trackers", if (msg.isEmpty()) "From Exodus Privacy" else msg, onClick = {
-                scope.launch { msg = try { "Updated: ${ApkScanner.refreshTrackers(c)} trackers" } catch (e: Exception) { "Update failed: are you offline?" } }
+            SetRow("Update trackers", if (updating) "Updating…" else if (msg.isEmpty()) "From Exodus Privacy" else msg, onClick = {
+                if (!updating) scope.launch {
+                    updating = true
+                    msg = try { "Updated: ${ApkScanner.refreshTrackers(c)} trackers" } catch (e: Exception) { "Update failed. Check your internet and try again." }
+                    updating = false
+                }
             }) { Chev() }
             SetRow("About Sentinel", last = true, onClick = onAbout) { Text("v$ver", color = Muted, fontSize = 13.sp) }
         }
@@ -824,19 +941,22 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun AccessTab(prefs: SharedPreferences, safe: Set<String>, onSafe: (String, Boolean) -> Unit, onOpen: (String) -> Unit) {
     val c = LocalContext.current; val scope = rememberCoroutineScope()
-    var list by remember { mutableStateOf<List<Pair<String, Pair<String, Set<String>>>>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    var list by remember { mutableStateOf<AccessList>(Cache.access(c) ?: emptyList()) }
+    var loading by remember { mutableStateOf(list.isEmpty()) }
+    var refreshing by remember { mutableStateOf(false) }
     var res by remember { mutableStateOf<List<String>?>(null) }
     var msg by remember { mutableStateOf("") }
     var showSafe by remember { mutableStateOf(false) }
     fun reload() {
+        if (refreshing) return
         scope.launch {
-            loading = true
-            list = withContext(Dispatchers.Default) { Access.privileged(c) }
-            loading = false
+            refreshing = true
+            val l = try { withContext(Dispatchers.Default) { Access.privileged(c) } } catch (_: Exception) { null }
+            if (l != null) { withContext(Dispatchers.IO) { Cache.putAccess(c, l) }; list = l }
+            loading = false; refreshing = false
         }
     }
-    LaunchedEffect(Unit) { reload() }
+    LaunchedEffect(Unit) { if (list.isEmpty() || Cache.accessStale()) reload() }
     val visible = list.filter { it.first !in safe }
     val hidden = list.size - visible.size
     @Composable fun Perms(ps: Set<String>, dim: Boolean) {
@@ -848,7 +968,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
             }
         }
     }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {
         item {
             Panel {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -874,13 +994,13 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Label("POWERFUL ACCESS · ${visible.size} APPS")
                 Spacer(Modifier.weight(1f))
-                TextButton({ reload() }) { Text("Refresh") }
+                TextButton({ reload() }, enabled = !refreshing) { Text(if (refreshing) "Refreshing…" else "Refresh") }
             }
         }
         if (loading) item { Text("Loading…", fontSize = 12.sp) }
         else if (visible.isEmpty()) item { Text("No unreviewed app has powerful access", fontSize = 12.sp, color = Green) }
         items(visible, key = { it.first }) { p ->
-            Panel(Modifier.clickable { onOpen(p.first) }) {
+            Panel(Modifier.tap { onOpen(p.first) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(p.second.first, Modifier.weight(1f), fontWeight = FontWeight.Bold)
                     MiniBtn("Review") {
@@ -915,15 +1035,18 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
     val info = remember(pkg, installed) { try { pm.getPackageInfo(pkg, 0) } catch (_: Exception) { null } }
     val cur = scans.firstOrNull()
     val name = cur?.name ?: info?.applicationInfo?.loadLabel(pm)?.toString() ?: pkg
-    var net by remember(pkg) { mutableStateOf<AppNet?>(null) }
+    var net by remember(pkg) { mutableStateOf(Cache.net(c)?.firstOrNull { it.pkg == pkg }) }
     var usageOk by remember { mutableStateOf(Monitor.hasUsage(c)) }
     LaunchedEffect(pkg) {
         usageOk = Monitor.hasUsage(c)
-        if (usageOk && installed) net = withContext(Dispatchers.Default) { Monitor.load(c).firstOrNull { it.pkg == pkg } }
+        if (usageOk && installed && (net == null || Cache.netStale())) {
+            val l = try { withContext(Dispatchers.Default) { Monitor.load(c) } } catch (_: Exception) { null }
+            if (l != null) { withContext(Dispatchers.IO) { Cache.putNet(c, l) }; net = l.firstOrNull { it.pkg == pkg } }
+        }
     }
     val day = DateFormat.getDateInstance(DateFormat.SHORT)
     val col = if (cur == null) Muted else if (safe) Green else sc(cur.score)
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {
         item {
             Panel {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1003,20 +1126,20 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
             itemsIndexed(scans, key = { _, s -> s.id }) { i, s ->
                 var open by remember { mutableStateOf(false) }
                 val older = scans.getOrNull(i + 1)
-                Item(sc(s.score), { open = !open }) {
+                Item(sc(s.score), { open = !open }, true) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Pill(s.score, sc(s.score))
-                            Column {
+                            Column(Modifier.weight(1f)) {
                                 Text(fmt(s.time), fontSize = 13.sp)
                                 val dl = if (older == null) 0 else s.score - older.score
                                 Text(if (older == null) "First scan" else if (dl > 0) "▲ $dl higher than before" else if (dl < 0) "▼ ${-dl} lower than before" else "Same score, findings changed",
                                     fontSize = 11.sp, color = if (older == null) Muted else if (dl > 0) Red else if (dl < 0) Green else Muted)
                             }
+                            Text(if (open) "▲" else "▼", color = Muted, fontSize = 11.sp)
                         }
-                        if (open) { Spacer(Modifier.height(8.dp)); Findings(s.text) }
+                        if (open) { Spacer(Modifier.height(10.dp)); Findings(s.text) }
                     }
-                    Text(if (open) "▲" else "▼", color = Muted, fontSize = 11.sp)
                 }
             }
         }
