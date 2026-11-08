@@ -142,7 +142,7 @@ class MainActivity : ComponentActivity() {
         applyTheme(this)
         setContent {
             val light = Pal.light
-            MaterialTheme(colorScheme = if (light) Light else Dark, typography = Typography(bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 1.3.em, letterSpacing = 0.sp))) {
+            MaterialTheme(colorScheme = if (light) Light else Dark, typography = Typography(bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, letterSpacing = 0.sp))) {
                 val bg = MaterialTheme.colorScheme.background
                 val view = LocalView.current
                 SideEffect {
@@ -396,14 +396,21 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
 
     fun copy(u: Uri, n: String): String {
         val f = File(c.cacheDir, n)
-        c.contentResolver.openInputStream(u)!!.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+        val inp = c.contentResolver.openInputStream(u) ?: error("Could not open that file")
+        inp.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
         return f.path
     }
     val pickApk = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
-        if (u != null) scope.launch { apk = withContext(Dispatchers.IO) { copy(u, "scan.apk") } }
+        if (u != null) scope.launch {
+            err = null
+            try { apk = withContext(Dispatchers.IO) { copy(u, "scan.apk") } } catch (_: Exception) { apk = null; err = "Could not open that file" }
+        }
     }
     val pickRef = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
-        if (u != null) scope.launch { ref = withContext(Dispatchers.IO) { copy(u, "ref.apk") } }
+        if (u != null) scope.launch {
+            err = null
+            try { ref = withContext(Dispatchers.IO) { copy(u, "ref.apk") } } catch (_: Exception) { ref = null; err = "Could not open the original file" }
+        }
     }
     fun run(path: String, refP: String?) {
         if (busy) return
@@ -413,7 +420,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                 val r = ApkScanner.scan(c, path, refP, prefs.getString("vt", "")!!, prefs.getString("mb", "")!!)
                 report = r; detail = null; page = "scan"; scanTab = 1
                 dao.add(r.entity())
-            } catch (e: Exception) { err = e.message ?: "Scan failed" }
+            } catch (e: Throwable) { if (e is kotlinx.coroutines.CancellationException) throw e; err = e.message ?: "Scan failed" }
             busy = false
         }
     }
@@ -563,7 +570,9 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                         Text("Nothing needs your attention.", fontSize = 13.sp, color = Green, modifier = Modifier.padding(start = 4.dp))
                     }
                 }
-                "scan" -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {
+                "scan" -> { val scanned = remember(latest) { latest.sortedByDescending { it.score } }
+                  val lowN = (latest.size - high - med).coerceAtLeast(0)
+                  LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)) {
                     item { Seg(listOf("Installed apps", "APK file"), scanTab) { scanTab = it } }
                     if (scanTab == 0) {
                         item {
@@ -585,6 +594,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                                     val la = lastAudit.split('|')
                                     val t = la.getOrNull(0)?.toLongOrNull()
                                     if (la.size == 3 && t != null) Text("Last check ${fmt(t)}: ${la[1]} apps scanned, ${la[2]} risky", fontSize = 12.sp)
+                                    else Text("Not checked yet. Tap Scan new apps.", fontSize = 12.sp)
                                 }
                             }
                         }
@@ -595,6 +605,33 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                             }
                         }
                         item { TextButton({ go("apps") }) { Text("Review risky apps →") } }
+                        item {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(Triple("High", high, Red), Triple("Medium", med, Amber), Triple("Low", lowN, Green)).forEach { (l, n, col) ->
+                                    Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                        Text("$n", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = col)
+                                        Text(l, fontSize = 12.sp, color = Muted)
+                                    }
+                                }
+                            }
+                        }
+                        item { Label("SCAN RESULTS (${scanned.size})") }
+                        if (scanned.isEmpty()) item { Text("No results yet. Tap Scan new apps.", fontSize = 13.sp, color = Muted, modifier = Modifier.padding(8.dp)) }
+                        items(scanned, key = { "r" + it.pkg }) { s ->
+                            val isSafe = s.pkg in safe
+                            val col = if (isSafe) Green else sc(s.score)
+                            Item(col, { detail = s.pkg }) {
+                                Pill(s.score, col)
+                                Column(Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(s.name, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                                        if (isSafe) Tag("SAFE", Green) else Tag(lvl(s.score).substringBefore(' ').uppercase(), col)
+                                    }
+                                    Text(if (isSafe) "Marked safe" else firstFinding(s.text) ?: "No serious findings", fontSize = 12.sp, color = Muted, maxLines = 1)
+                                }
+                                Chev()
+                            }
+                        }
                     } else {
                         item {
                             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).border(1.5.dp, Line, RoundedCornerShape(18.dp))
@@ -628,8 +665,8 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                         TextButton({
-                                            c.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                                                .putExtra(Intent.EXTRA_TEXT, "Sentinel: ${r.name} ${r.score}/100 (${lvl(r.score)})\n" + r.text()), null))
+                                            try { c.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                                                .putExtra(Intent.EXTRA_TEXT, "Sentinel: ${r.name} ${r.score}/100 (${lvl(r.score)})\n" + r.text()), null)) } catch (_: Exception) {}
                                         }) { Text("Share report") }
                                         if (r.pkg in inst) SafeButton(r.pkg in safe) { setSafe(r.pkg, r.pkg !in safe) }
                                     }
@@ -638,6 +675,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                             }
                         }
                     }
+                  }
                 }
                 "apps" -> AppsPage(latest, safe, ::setSafe) { detail = it }
                 "more" -> MorePage { go(it) }
@@ -792,8 +830,8 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                 Text("${shown.size} results", Modifier.weight(1f), color = Muted, fontSize = 13.sp)
                 TextButton({ byRisk = !byRisk }) { Text(if (byRisk) "Riskiest first" else "Newest first") }
                 TextButton({
-                    c.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                        .putExtra(Intent.EXTRA_TEXT, shown.joinToString("\n") { "${it.score}  ${it.name} (${it.pkg})" }), null))
+                    try { c.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(Intent.EXTRA_TEXT, shown.joinToString("\n") { "${it.score}  ${it.name} (${it.pkg})" }), null)) } catch (_: Exception) {}
                 }) { Text("Export") }
             }
         }
@@ -835,7 +873,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
             refreshing = false
         }
     }
-    var sel by remember { mutableIntStateOf(0) }
+    var sel by remember { mutableIntStateOf(1) }
     LaunchedEffect(Unit) { ok = Monitor.hasUsage(c); if (ok && (apps.isEmpty() || Cache.netStale())) reload() }
     val flagged = apps.filter { it.flags.isNotEmpty() && it.pkg !in safe }
     val maxTx = (apps.maxOfOrNull { it.tx } ?: 1L).coerceAtLeast(1L).toFloat()
@@ -844,7 +882,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
         if (!ok) item {
             Panel {
                 Text("Allow usage access so Sentinel can read per-app network totals.", fontSize = 13.sp)
-                Button({ c.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("Open usage access") }
+                Button({ openSettings(c, Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS), Intent(android.provider.Settings.ACTION_SETTINGS)) }) { Text("Open usage access") }
             }
         }
         item {
@@ -947,10 +985,11 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
             }) { Chev() }
             SetRow("Battery", if (battery) "Unrestricted: checks can run in the background" else "Restricted: the phone may stop background checks", onClick = {
                 openSettings(c, Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${c.packageName}")))
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${c.packageName}")),
+                    Intent(android.provider.Settings.ACTION_SETTINGS))
             }) { Text(if (battery) "OK" else "Fix ›", color = if (battery) Green else Amber, fontSize = 13.sp) }
             SetRow("Usage access", if (usage) "Allowed" else "Needed for the network monitor", onClick = {
-                openSettings(c, Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                openSettings(c, Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS), Intent(android.provider.Settings.ACTION_SETTINGS))
             }) { Text(if (usage) "OK" else "Allow ›", color = if (usage) Green else Amber, fontSize = 13.sp) }
             SetRow("Safe apps", if (safeCount == 0) "No apps marked as safe" else "$safeCount app${if (safeCount == 1) "" else "s"} marked as safe", last = true, onClick = clearClick) {
                 if (safeCount > 0) Text("Clear ›", color = Muted, fontSize = 13.sp)
@@ -1140,7 +1179,7 @@ private val PAGE_TITLES = mapOf("scan" to "Scan", "apps" to "My apps", "more" to
                     Bar(if (n.tx + n.rx == 0L) 0f else n.tx / (n.tx + n.rx).toFloat(), if (n.flags.isEmpty()) Blue else sc(n.score))
                     n.flags.forEach { Text("● $it", color = sc(n.score), fontSize = 12.sp) }
                 }
-                if (!usageOk) OutlinedButton({ c.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("Open usage access") }
+                if (!usageOk) OutlinedButton({ openSettings(c, Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS), Intent(android.provider.Settings.ACTION_SETTINGS)) }) { Text("Open usage access") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Block this app's internet", fontWeight = FontWeight.Bold, fontSize = 14.sp)

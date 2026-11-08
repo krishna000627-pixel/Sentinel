@@ -2,6 +2,8 @@
 package com.sentinel.app
 
 import android.content.Context
+import android.content.pm.ActivityInfo
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -13,6 +15,8 @@ import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.zip.ZipFile
 
@@ -230,28 +234,144 @@ object ApkScanner {
         return hex(md.digest())
     }
 
+    private class RawManifest(val pkg: String, val perms: List<String>, val svcPerms: List<String>, val rcvPerms: List<String>)
+
+    /** Reads the binary AndroidManifest.xml straight from the zip, for APKs the system parser refuses. */
+    private fun rawManifest(path: String): RawManifest? = try {
+        val b = ZipFile(path).use { z ->
+            val e = z.getEntry("AndroidManifest.xml") ?: return@use null
+            z.getInputStream(e).use { it.readBytes() }
+        }
+        if (b == null) null else parseAxml(b)
+    } catch (_: Throwable) { null }
+
+    private fun parseAxml(b: ByteArray): RawManifest? {
+        val bb = ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN)
+        fun u16(o: Int) = bb.getShort(o).toInt() and 0xffff
+        fun i32(o: Int) = bb.getInt(o)
+        if (b.size < 16 || u16(0) != 0x0003) return null
+        var strings: List<String> = emptyList()
+        var pkg = ""
+        val perms = ArrayList<String>(); val sp = ArrayList<String>(); val rp = ArrayList<String>()
+        var off = u16(2)
+        val end = minOf(i32(4), b.size)
+        while (off + 8 <= end) {
+            val type = u16(off); val size = i32(off + 4)
+            if (size <= 0) break
+            if (type == 0x0001) {
+                val count = i32(off + 8); val utf8 = (i32(off + 16) and 0x100) != 0
+                val sStart = i32(off + 20); val offs = off + u16(off + 2)
+                strings = (0 until count).map { i ->
+                    try {
+                        var so = off + sStart + i32(offs + 4 * i)
+                        if (utf8) {
+                            so += if ((b[so].toInt() and 0x80) != 0) 2 else 1
+                            var bl = b[so].toInt() and 0xff
+                            if ((bl and 0x80) != 0) { bl = ((bl and 0x7f) shl 8) or (b[so + 1].toInt() and 0xff); so += 2 } else so += 1
+                            String(b, so, bl, Charsets.UTF_8)
+                        } else {
+                            var len = u16(so); var q = so + 2
+                            if ((len and 0x8000) != 0) { len = ((len and 0x7fff) shl 16) or u16(so + 2); q = so + 4 }
+                            String(b, q, len * 2, Charsets.UTF_16LE)
+                        }
+                    } catch (_: Throwable) { "" }
+                }
+            } else if (type == 0x0102 && strings.isNotEmpty()) {
+                val tag = strings.getOrNull(i32(off + 20)) ?: ""
+                val base = off + 16 + u16(off + 24); val asz = u16(off + 26); val ac = u16(off + 28)
+                var nm = ""; var perm = ""; var pk = ""
+                for (i in 0 until ac) {
+                    val a = base + i * asz
+                    if (a + 20 > b.size) break
+                    val an = strings.getOrNull(i32(a + 4)) ?: ""
+                    val rv = i32(a + 8)
+                    val v = if (rv >= 0) strings.getOrNull(rv) ?: "" else if ((b[a + 15].toInt() and 0xff) == 0x03) strings.getOrNull(i32(a + 16)) ?: "" else ""
+                    when (an) { "name" -> nm = v; "permission" -> perm = v; "package" -> pk = v }
+                }
+                when (tag) {
+                    "manifest" -> if (pk.isNotEmpty()) pkg = pk
+                    "uses-permission", "uses-permission-sdk-23" -> if (nm.isNotEmpty()) perms += nm
+                    "service" -> if (perm.isNotEmpty()) sp += perm
+                    "receiver" -> if (perm.isNotEmpty()) rp += perm
+                }
+            }
+            off += size
+        }
+        return if (pkg.isEmpty() && perms.isEmpty()) null else RawManifest(pkg.ifEmpty { "unknown" }, perms, sp, rp)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun synth(r: RawManifest, path: String): PackageInfo {
+        val pi = PackageInfo()
+        pi.packageName = r.pkg
+        pi.requestedPermissions = r.perms.toTypedArray()
+        val ai = ApplicationInfo()
+        ai.packageName = r.pkg; ai.sourceDir = path; ai.publicSourceDir = path; ai.nonLocalizedLabel = r.pkg
+        pi.applicationInfo = ai
+        pi.services = r.svcPerms.map { p -> ServiceInfo().also { it.permission = p } }.toTypedArray()
+        pi.receivers = r.rcvPerms.map { p -> ActivityInfo().also { it.permission = p } }.toTypedArray()
+        return pi
+    }
+
+    /** Reads an APK with the system parser, trying lighter flag sets, and falls back to reading the manifest ourselves. */
+    @Suppress("DEPRECATION")
+    private fun readApk(c: Context, path: String): PackageInfo? {
+        val pm = c.packageManager
+        val sign = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        val a = PackageManager.GET_PERMISSIONS or PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS
+        for (fl in intArrayOf(a or sign, a, PackageManager.GET_PERMISSIONS, 0)) {
+            val pi = try { pm.getPackageArchiveInfo(path, fl) } catch (_: Throwable) { null }
+            if (pi != null) {
+                pi.applicationInfo?.let { it.sourceDir = path; it.publicSourceDir = path }
+                return pi
+            }
+        }
+        return rawManifest(path)?.let { synth(it, path) }
+    }
+
+    /** Returns a path to a real APK: the file itself, or the base APK inside an .xapk / .apks / .apkm bundle. */
+    private fun prepare(c: Context, path: String, outName: String): String {
+        val f = File(path)
+        if (!f.isFile || f.length() < 4) error("Not a valid APK: the file is empty or could not be read")
+        val z = try { ZipFile(f) } catch (_: Exception) { error("Not a valid APK: this is not a ZIP archive. Pick the .apk file itself") }
+        return z.use { zf ->
+            if (zf.getEntry("AndroidManifest.xml") != null) return@use path
+            val apks = zf.entries().asSequence().filter { !it.isDirectory && it.name.endsWith(".apk", true) }.toList()
+            if (apks.isEmpty()) error("Not a valid APK: no AndroidManifest.xml inside")
+            val pick = apks.firstOrNull { it.name.substringAfterLast('/').equals("base.apk", true) } ?: apks.maxByOrNull { it.size }!!
+            val out = File(c.cacheDir, outName)
+            zf.getInputStream(pick).use { i -> out.outputStream().use { o -> i.copyTo(o) } }
+            out.path
+        }
+    }
+
     /** Pre-install scan of an APK file (optionally compared with the original), with optional cloud hash checks. */
+    @Suppress("DEPRECATION")
     suspend fun scan(c: Context, path: String, refPath: String?, vt: String, mb: String): Report = withContext(Dispatchers.IO) {
         val pm = c.packageManager
-        val fl = PackageManager.GET_PERMISSIONS or PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS or
-            (if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES)
-        val pi = pm.getPackageArchiveInfo(path, fl) ?: error("Not a valid APK")
-        pi.applicationInfo?.let { it.sourceDir = path; it.publicSourceDir = path }
+        val apk = prepare(c, path, "scan_base.apk")
+        val pi = readApk(c, apk) ?: error("Not a valid APK: Android could not read it and its manifest is damaged")
         val f = mutableListOf<Finding>()
         val req = pi.requestedPermissions?.toList() ?: emptyList()
         val cs = certs(pi)
-        val ref: PackageInfo? = if (refPath != null) pm.getPackageArchiveInfo(refPath, fl)
-            else try { pm.getPackageInfo(pi.packageName, fl) } catch (_: Exception) { null }
-        if (ref == null) f += Finding(0, "No original to compare. Pick the original APK to see signer changes", 0)
+        val refApk = refPath?.let { try { prepare(c, it, "ref_base.apk") } catch (_: Exception) { null } }
+        val ref: PackageInfo? = if (refPath != null) refApk?.let { readApk(c, it) }
+            else try {
+                pm.getPackageInfo(pi.packageName, PackageManager.GET_PERMISSIONS or
+                    (if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES))
+            } catch (_: Exception) { null }
+        if (cs.isEmpty()) f += Finding(1, "Signing certificate could not be read (unsigned, or the signature is damaged)", 6)
+        if (ref == null) f += Finding(0, if (refPath != null) "The original file could not be read, so nothing was compared" else "No original to compare. Pick the original APK to see signer changes", 0)
         else {
             val rc = certs(ref)
             if (ref.packageName != pi.packageName) f += Finding(1, "Original has a different package name (${ref.packageName})", 5)
-            if (cs.toSet() == rc.toSet()) f += Finding(0, "Signed by the same certificate as the original", 0)
+            if (cs.isEmpty() || rc.isEmpty()) f += Finding(0, "Signer comparison skipped: a certificate could not be read", 0)
+            else if (cs.toSet() == rc.toSet()) f += Finding(0, "Signed by the same certificate as the original", 0)
             else f += Finding(2, "Re-signed: certificate ${cs.firstOrNull()?.take(16)}… differs from original ${rc.firstOrNull()?.take(16)}…", 20)
             val added = req.toSet() - (ref.requestedPermissions?.toSet() ?: emptySet())
             if (added.isNotEmpty()) f += Finding(1, "Mod adds ${added.size} permissions: ${added.take(6).joinToString { it.substringAfterLast('.') }}", minOf(added.size * 2, 12), true)
         }
-        analyze(c, pi, path, f, vt, mb, false)
+        analyze(c, pi, apk, f, vt, mb, false)
     }
 
     /** Fast scan of an app that is already installed (used for background audits). No network, no signer comparison. */
@@ -263,7 +383,7 @@ object ApkScanner {
 
     private fun analyze(c: Context, pi: PackageInfo, path: String, f: MutableList<Finding>, vt: String, mb: String, quick: Boolean): Report {
         val pm = c.packageManager
-        val name = pi.applicationInfo?.loadLabel(pm)?.toString() ?: pi.packageName
+        val name = try { pi.applicationInfo?.loadLabel(pm)?.toString() } catch (_: Throwable) { null } ?: pi.packageName
 
         val req = pi.requestedPermissions?.toList() ?: emptyList()
         val pay = isPayment(pi.packageName, name)
