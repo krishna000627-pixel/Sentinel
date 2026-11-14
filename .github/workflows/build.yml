@@ -1,15 +1,68 @@
-name: Build APK
+# apphub-managed: App Hub v92. Change the options in .github/apphub.json (App Hub: project > Settings > Workflows), not in this file.
+name: Build
 
 on:
   push:
     branches: [main, master]
   workflow_dispatch:
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 jobs:
-  build:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      kind: ${{ steps.d.outputs.kind }}
+      run: ${{ steps.d.outputs.run }}
+      java: ${{ steps.d.outputs.java }}
+      gradle: ${{ steps.d.outputs.gradle }}
+      module: ${{ steps.d.outputs.module }}
+      wrapper: ${{ steps.d.outputs.wrapper }}
+      variant: ${{ steps.d.outputs.variant }}
+      sign: ${{ steps.d.outputs.sign }}
+      days: ${{ steps.d.outputs.days }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        run: |
+          C=.github/apphub.json
+          cfg() { [ -f "$C" ] || return 0; jq -r --arg k "$1" 'if has($k) then .[$k] | tostring else empty end' "$C" 2>/dev/null || true; }
+          kind=static
+          if [ -f app/build.gradle ] || [ -f app/build.gradle.kts ] || [ -f build.gradle ] || [ -f build.gradle.kts ]; then kind=android
+          elif [ -f package.json ]; then kind=node; fi
+          run=true
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$(cfg build_on_push)" = "false" ]; then run=false; fi
+          # the app module: the folder whose build file applies com.android.application (default: app)
+          module=app
+          if [ "$kind" = "android" ]; then
+            for f in $(find . -maxdepth 4 \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -not -path './.git/*' | sort); do
+              if grep -q 'com.android.application' "$f"; then module=$(dirname "$f" | sed 's|^\./||'); [ "$module" = "." ] && module=""; break; fi
+            done
+          fi
+          # a Gradle wrapper in the repo is used as it is; without one the workflow installs the Gradle version from the options
+          wrapper=false
+          if [ -f gradlew ] && [ -f gradle/wrapper/gradle-wrapper.properties ]; then wrapper=true; fi
+          v=$(cfg java); java=${v:-17}
+          v=$(cfg gradle); gradle=${v:-8.10.2}
+          if [ "$wrapper" = "true" ]; then gradle=""; fi
+          v=$(cfg variant); variant=${v:-release}
+          v=$(cfg sign); sign=${v:-auto}
+          v=$(cfg artifact_days); days=${v:-1}
+          {
+            echo "kind=$kind"; echo "run=$run"; echo "java=$java"; echo "gradle=$gradle"
+            echo "module=$module"; echo "wrapper=$wrapper"
+            echo "variant=$variant"; echo "sign=$sign"; echo "days=$days"
+          } >> "$GITHUB_OUTPUT"
+          echo "Detected: $kind, module: ${module:-root}, wrapper: $wrapper (build on this event: $run)"
+
+  android:
+    needs: detect
+    if: needs.detect.outputs.kind == 'android' && needs.detect.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,38 +70,76 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: ${{ needs.detect.outputs.java }}
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.10.2
+          gradle-version: ${{ needs.detect.outputs.gradle }}
+
+      - name: Prepare Android SDK
+        run: |
+          if [ -x "${ANDROID_HOME:-/nonexistent}/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          fi
+          if [ -f gradlew ]; then chmod +x gradlew; fi
 
       - name: Decode keystore
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          SIGN: ${{ needs.detect.outputs.sign }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
+          if [ "$SIGN" != "debug" ] && [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
           else
-            echo "No keystore secret found, falling back to debug signing."
+            echo "No keystore used, falling back to debug signing."
           fi
 
-      - name: Build release APK
+      - name: Build APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
+          VARIANT: ${{ needs.detect.outputs.variant }}
+          MODULE: ${{ needs.detect.outputs.module }}
+          WRAPPER: ${{ needs.detect.outputs.wrapper }}
+        run: |
+          task="assemble$(echo "${VARIANT:0:1}" | tr a-z A-Z)${VARIANT:1}"
+          if [ -n "$MODULE" ]; then task=":${MODULE//\//:}:$task"; fi
+          if [ "$WRAPPER" = "true" ]; then g=./gradlew; else g=gradle; fi
+          $g "$task" --no-daemon --stacktrace
+
+      - name: Find APK
+        id: apk
+        env:
+          VARIANT: ${{ needs.detect.outputs.variant }}
+          MODULE: ${{ needs.detect.outputs.module }}
+        run: |
+          dir="${MODULE:+$MODULE/}build/outputs/apk/$VARIANT"
+          if ! ls "$dir"/*.apk >/dev/null 2>&1; then echo "No APK in $dir"; find . -name '*.apk' -not -path './.git/*' | head; exit 1; fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.repository.name }}-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: ${{ steps.apk.outputs.dir }}/*.apk
+          retention-days: ${{ needs.detect.outputs.days }}
+          if-no-files-found: error
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: ${{ github.event.repository.name }} build ${{ github.run_number }}
-          files: app/build/outputs/apk/release/*.apk
+          files: ${{ steps.apk.outputs.dir }}/*.apk
+
+  node:
+    needs: detect
+    if: needs.detect.outputs.kind == 'node' && needs.detect.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and build
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run build --if-present

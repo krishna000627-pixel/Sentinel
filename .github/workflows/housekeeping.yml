@@ -1,0 +1,42 @@
+# apphub-managed: App Hub v90. Change the options in .github/apphub.json (App Hub: project > Settings > Workflows), not in this file.
+# Keeps a private repo under the free 500 MB of Actions storage: removes old build artifacts and old build-N releases.
+name: Housekeeping
+
+on:
+  schedule:
+    - cron: '17 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove old artifacts and releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          C=.github/apphub.json
+          cfg() { [ -f "$C" ] || return 0; jq -r --arg k "$1" 'if has($k) then .[$k] | tostring else empty end' "$C" 2>/dev/null || true; }
+          if [ "$(cfg cleanup)" = "false" ]; then echo "Cleanup is off in apphub.json"; exit 0; fi
+          keep=$(cfg keep_releases); keep=${keep:-10}
+          if [ "$keep" -lt 2 ]; then keep=2; fi
+
+          echo "Artifacts older than a day:"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.created_at < (now - 86400 | todate)) | .id' | while read -r id; do
+              echo "  delete artifact $id"
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" --silent || true
+            done
+
+          echo "Releases: keeping the newest $keep build-N releases"
+          gh release list --limit 300 --json tagName \
+            --jq "[.[].tagName | select(startswith(\"build-\"))] | .[$keep:] | .[]" | while read -r tag; do
+              echo "  delete release $tag"
+              gh release delete "$tag" --yes --cleanup-tag || true
+            done
